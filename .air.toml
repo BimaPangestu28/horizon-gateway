@@ -1,0 +1,51 @@
+# Config file for Air hot reload
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+# Nama binary yang dihasilkan
+bin = "./tmp/horizon"
+# Command untuk build
+cmd = "go build -o ./tmp/horizon cmd/horizon/main.go"
+# Command untuk melakukan build dan run
+full_bin = "./tmp/horizon"
+# Ekstensi file yang dipantau
+include_ext = ["go", "yaml", "toml"]
+# Direktori yang tidak dipantau
+exclude_dir = ["tmp", "vendor", ".git"]
+# File yang tidak dipantau
+exclude_file = []
+# Log ketika terjadi perubahan
+log = "build-errors.log"
+# Waktu tunggu (polling interval)
+delay = 1000 # ms
+# Kill proses sebelum memulai yang baru
+kill_delay = "0s"
+# Argumen tambahan untuk command
+args_bin = []
+# Bersihkan folder tmp/
+clean = true
+# Menampilkan log dari aplikasi
+follow_symlink = true
+# Build ulang jika terjadi error
+rerun = false
+# Menampilkan warna di output
+send_interrupt = false
+# Mengirim sinyal SIGTERM pada saat stop
+stop_on_error = true
+
+[log]
+# Tampilkan warna di log
+time = false
+
+[color]
+# Custom color untuk output
+main = "magenta"
+watcher = "cyan"
+build = "yellow"
+runner = "green"
+
+[misc]
+# Bersihkan layar terminal sebelum build
+clean_on_exit = true

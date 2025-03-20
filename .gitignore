@@ -1,0 +1,35 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+horizon
+horizon-*
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Air hot reload
+tmp/
+build-errors.log
+
+# Log files
+*.log
+
+# Config files for local development
+config.test.yaml
+config.local.yaml
+
+# OS specific files
+.DS_Store
+Thumbs.db

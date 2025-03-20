@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: horizon-gateway
+  labels:
+    app: horizon-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: horizon-gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: horizon-gateway
+    spec:
+      containers:
+        - name: horizon-gateway
+          image: horizongateway/horizon:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 8081
+              name: admin
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/horizon
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: config-volume
+          configMap:
+            name: horizon-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: horizon-config
+data:
+  config.yaml: |
+    server:
+      port: 8080
+      admin_port: 8081
+      read_timeout: 30s
+      write_timeout: 30s
+      idle_timeout: 120s
+    
+    routes:
+      - name: example-api
+        listen_path: /api/*
+        upstream_url: http://example-api-service
+        methods: ["*"]
+        strip_path: true
+      
+      - name: users-api
+        listen_path: /users/*
+        upstream_url: http://users-api-service
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        strip_path: false

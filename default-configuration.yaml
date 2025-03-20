@@ -1,0 +1,80 @@
+# Horizon API Gateway Configuration
+version: "v1.0.0"
+config:
+  server:
+    port: 8080
+    admin_port: 8081
+    read_timeout: 30s
+    write_timeout: 30s
+    idle_timeout: 120s
+    
+    # TLS configuration
+    tls:
+      enabled: false
+      cert_file: /etc/horizon/tls/cert.pem
+      key_file: /etc/horizon/tls/key.pem
+
+  routes:
+    # Basic route to httpbin service
+    - name: httpbin
+      listen_path: /api/*
+      upstream_url: http://mock-service:80
+      methods: ["*"]
+      strip_path: true
+      priority: 10
+    
+    # Advanced route with multiple targets and health checks
+    - name: users-api
+      listen_path: /users/*
+      upstream_url: http://users-service:8000
+      methods: ["GET", "POST", "PUT", "DELETE"]
+      strip_path: true
+      priority: 100
+      headers:
+        "Content-Type": "application/json"
+      query_params:
+        "version": "v2"
+      host: "api.example.com"
+      load_balancing:
+        type: "weighted"
+        targets:
+          - url: "http://users-service-1:8000"
+            weight: 3
+          - url: "http://users-service-2:8000"
+            weight: 2
+          - url: "http://users-service-3:8000"
+            weight: 1
+        health_check:
+          path: "/health"
+          interval: "10s"
+          timeout: "5s"
+          healthy_threshold: 2
+          unhealthy_threshold: 3
+    
+    # Least connections load balancing example
+    - name: search-api
+      listen_path: /search/*
+      upstream_url: http://search-service:8000
+      methods: ["GET"]
+      strip_path: true
+      priority: 50
+      load_balancing:
+        type: "least_conn"
+        targets:
+          - url: "http://search-service-1:8000"
+          - url: "http://search-service-2:8000"
+          - url: "http://search-service-3:8000"
+        health_check:
+          path: "/health"
+          interval: "5s"
+          timeout: "2s"
+          healthy_threshold: 2
+          unhealthy_threshold: 3
+    
+    # Public API route
+    - name: jsonplaceholder
+      listen_path: /posts/*
+      upstream_url: https://jsonplaceholder.typicode.com
+      methods: ["GET", "POST"]
+      strip_path: false
+      priority: 5

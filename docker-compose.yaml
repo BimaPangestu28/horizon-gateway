@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  horizon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"  # Main API Gateway port
+      - "8081:8081"  # Admin API port
+    volumes:
+      - ./config.yaml:/etc/horizon/config.yaml
+    environment:
+      - LOG_LEVEL=debug
+    restart: unless-stopped
+    networks:
+      - horizon-net
+
+  # Mock service for testing
+  mock-service:
+    image: kennethreitz/httpbin
+    ports:
+      - "8000:80"
+    networks:
+      - horizon-net
+
+networks:
+  horizon-net:
+    driver: bridge
