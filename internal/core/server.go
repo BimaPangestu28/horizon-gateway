@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
@@ -28,35 +27,6 @@ type Server struct {
 	mu       sync.RWMutex
 }
 
-// Create factory functions for handlers
-func createProxyHandler(router interfaces.Router, logger logging.Logger) fiber.Handler {
-	// Create a function that wraps the proxy handler logic
-	return func(c *fiber.Ctx) error {
-		// Implement proxy logic here instead of importing handlers
-		// Or move the proxy_handler.go to a different package without core dependencies
-	}
-}
-
-// HealthCheck handler directly in server.go
-func healthCheckHandler(c *fiber.Ctx) error {
-	return c.Status(http.StatusOK).JSON(fiber.Map{
-		"status": "ok",
-		"time":   time.Now().Format(time.RFC3339),
-	})
-}
-
-// CustomErrorHandler provides error handling for HTTP requests
-func CustomErrorHandler(c *fiber.Ctx, err error) error {
-	// Simple implementation to avoid importing handlers
-	code := http.StatusInternalServerError
-	if fiberErr, ok := err.(*fiber.Error); ok {
-		code = fiberErr.Code
-	}
-	return c.Status(code).JSON(fiber.Map{
-		"error": err.Error(),
-	})
-}
-
 // NewServer creates a new API Gateway server instance
 func NewServer(cfg *config.Config, logger logging.Logger) (*Server, error) {
 	// Create router
@@ -65,15 +35,15 @@ func NewServer(cfg *config.Config, logger logging.Logger) (*Server, error) {
 		return nil, fmt.Errorf("creating router: %w", err)
 	}
 
-	// Create main server app
+	// Create main server app with corrected config
 	app := fiber.New(fiber.Config{
 		ReadTimeout:             cfg.Server.ReadTimeout,
 		WriteTimeout:            cfg.Server.WriteTimeout,
 		IdleTimeout:             cfg.Server.IdleTimeout,
-		ErrorHandler:            CustomErrorHandler,
+		ErrorHandler:            handlers.CustomErrorHandler,
 		EnableTrustedProxyCheck: true,
-		EnableHTTP2:             true,
-		ServerHeader:            "Horizon API Gateway",
+		// Removed the EnableHTTP2 field as it's not available in the current version
+		ServerHeader: "Horizon API Gateway",
 	})
 
 	// Add global middlewares
@@ -177,4 +147,24 @@ func (s *Server) registerAdminRoutes() {
 
 	// Configuration management
 	admin.Get("/config", handlers.GetConfig)
+}
+
+func (s *Server) UpdateConfig(cfg *config.Config) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Update server config
+	s.config = cfg
+
+	// Create new router with updated routes
+	router, err := NewRouter(cfg.Routes, s.logger)
+	if err != nil {
+		return fmt.Errorf("creating router: %w", err)
+	}
+
+	// Update router
+	s.router = router
+
+	s.logger.Info("Server configuration updated")
+	return nil
 }

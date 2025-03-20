@@ -1,3 +1,6 @@
+// Fix for internal/core/health_checker.go:122:17: declared and not used: check
+// internal/core/health_checker.go
+
 package core
 
 import (
@@ -119,7 +122,7 @@ func (hc *HealthChecker) checkAllTargets() {
 	}
 
 	// Remove health checks for targets that no longer exist
-	for targetURL, check := range hc.checks {
+	for targetURL := range hc.checks {
 		exists := false
 		for _, target := range hc.loadBalancer.targets {
 			if target.URL.String() == targetURL {

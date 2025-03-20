@@ -13,26 +13,24 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/bimapangestu28/horizon/internal/core"
 	apierrors "github.com/bimapangestu28/horizon/internal/errors"
+	"github.com/bimapangestu28/horizon/internal/interfaces"
+	"github.com/bimapangestu28/horizon/internal/types"
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
 // RequestTimeout defines how long a proxied request can take before timing out
 const RequestTimeout = 30 * time.Second
 
-// ProxyError represents an error that occurred during request proxying
-var ErrProxyTimeout = errors.New("proxy request timed out")
-
 // ProxyHandler handles proxying HTTP requests to upstream services
 type ProxyHandler struct {
-	router *core.Router
+	router interfaces.Router // Changed from core.Router to interfaces.Router
 	logger logging.Logger
 	client *http.Client
 }
 
 // NewProxyHandler creates a new proxy handler with the given router
-func NewProxyHandler(router *core.Router, logger logging.Logger) *ProxyHandler {
+func NewProxyHandler(router interfaces.Router, logger logging.Logger) *ProxyHandler {
 	// Create HTTP client with connection pooling
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -136,22 +134,11 @@ func (h *ProxyHandler) HandleRequest(c *fiber.Ctx) error {
 }
 
 // forwardRequest forwards the request to the upstream service
-func (h *ProxyHandler) forwardRequest(ctx context.Context, c *fiber.Ctx, route *core.Route) (*http.Response, error) {
-	// Get the next target from the load balancer
-	target, ok := route.LoadBalancer.GetNextTarget()
-	if !ok {
-		return nil, fmt.Errorf("no available targets for route %s", route.Name)
-	}
-
-	// Track this connection
-	route.LoadBalancer.IncrementConn(target)
-	defer route.LoadBalancer.DecrementConn(target)
-
+func (h *ProxyHandler) forwardRequest(ctx context.Context, c *fiber.Ctx, route *types.Route) (*http.Response, error) {
 	// Create target URL
-	targetURL := &url.URL{
-		Scheme: target.URL.Scheme,
-		Host:   target.URL.Host,
-		Path:   target.URL.Path,
+	targetURL, err := url.Parse(route.UpstreamURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid upstream URL: %w", err)
 	}
 
 	// Handle path rewriting
@@ -171,10 +158,14 @@ func (h *ProxyHandler) forwardRequest(ctx context.Context, c *fiber.Ctx, route *
 	} else {
 		// Ensure we don't have double slashes
 		targetURL.Path = path.Join(targetURL.Path, requestPath)
+		// Preserve trailing slash which path.Join removes
+		if strings.HasSuffix(requestPath, "/") && !strings.HasSuffix(targetURL.Path, "/") {
+			targetURL.Path += "/"
+		}
 	}
 
 	// Copy query parameters
-	targetURL.RawQuery = c.Request().URI().QueryArgs().String()
+	targetURL.RawQuery = string(c.Request().URI().QueryString())
 
 	// Create a new HTTP request
 	req, err := http.NewRequestWithContext(ctx, c.Method(), targetURL.String(), strings.NewReader(string(c.Body())))
