@@ -6,7 +6,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/bimapangestu28/horizon/internal/core"
+	apierrors "github.com/bimapangestu28/horizon/internal/errors"
 )
 
 // ErrorResponse represents a standardized error response
@@ -27,10 +27,10 @@ func CustomErrorHandler(c *fiber.Ctx, err error) error {
 		// Handle Fiber's built-in errors
 		code = fiberErr.Code
 		message = fiberErr.Message
-	} else if errors.Is(err, core.ErrRouteNotFound) {
+	} else if errors.Is(err, apierrors.ErrRouteNotFound) {
 		code = http.StatusNotFound
 		message = "Route not found"
-	} else if errors.Is(err, core.ErrMethodNotAllowed) {
+	} else if errors.Is(err, apierrors.ErrMethodNotAllowed) {
 		code = http.StatusMethodNotAllowed
 		message = "Method not allowed"
 	}

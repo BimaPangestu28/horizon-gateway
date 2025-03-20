@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/bimapangestu28/horizon/internal/config"
+	apierrors "github.com/bimapangestu28/horizon/internal/errors"
+	"github.com/bimapangestu28/horizon/internal/interfaces"
+	"github.com/bimapangestu28/horizon/internal/types"
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
@@ -22,9 +25,11 @@ var (
 
 // Router handles route matching and management
 type Router struct {
-	routes []*Route
+	routes []*types.Route
 	logger logging.Logger
 }
+
+var _ interfaces.Router = (*Router)(nil)
 
 // Route represents a configured API route
 type Route struct {
@@ -187,7 +192,7 @@ func (r *Router) FindRoute(req *http.Request) (*Route, error) {
 
 		// Check if method is allowed
 		if !isMethodAllowed(method, route.Methods) {
-			return nil, ErrMethodNotAllowed
+			return nil, apierrors.ErrMethodNotAllowed
 		}
 
 		// Check host if specified
@@ -226,7 +231,7 @@ func (r *Router) FindRoute(req *http.Request) (*Route, error) {
 
 	// No matches found
 	if len(matchingRoutes) == 0 {
-		return nil, ErrRouteNotFound
+		return nil, apierrors.ErrRouteNotFound
 	}
 
 	// If multiple matches, select the one with highest priority

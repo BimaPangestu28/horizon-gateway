@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/bimapangestu28/horizon/internal/config"
 	"github.com/bimapangestu28/horizon/internal/handlers"
+	"github.com/bimapangestu28/horizon/internal/interfaces"
 	"github.com/bimapangestu28/horizon/internal/middleware"
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
@@ -21,9 +23,38 @@ type Server struct {
 	app      *fiber.App
 	adminApp *fiber.App
 	config   *config.Config
-	router   *Router
+	router   interfaces.Router
 	logger   logging.Logger
 	mu       sync.RWMutex
+}
+
+// Create factory functions for handlers
+func createProxyHandler(router interfaces.Router, logger logging.Logger) fiber.Handler {
+	// Create a function that wraps the proxy handler logic
+	return func(c *fiber.Ctx) error {
+		// Implement proxy logic here instead of importing handlers
+		// Or move the proxy_handler.go to a different package without core dependencies
+	}
+}
+
+// HealthCheck handler directly in server.go
+func healthCheckHandler(c *fiber.Ctx) error {
+	return c.Status(http.StatusOK).JSON(fiber.Map{
+		"status": "ok",
+		"time":   time.Now().Format(time.RFC3339),
+	})
+}
+
+// CustomErrorHandler provides error handling for HTTP requests
+func CustomErrorHandler(c *fiber.Ctx, err error) error {
+	// Simple implementation to avoid importing handlers
+	code := http.StatusInternalServerError
+	if fiberErr, ok := err.(*fiber.Error); ok {
+		code = fiberErr.Code
+	}
+	return c.Status(code).JSON(fiber.Map{
+		"error": err.Error(),
+	})
 }
 
 // NewServer creates a new API Gateway server instance
@@ -39,9 +70,9 @@ func NewServer(cfg *config.Config, logger logging.Logger) (*Server, error) {
 		ReadTimeout:             cfg.Server.ReadTimeout,
 		WriteTimeout:            cfg.Server.WriteTimeout,
 		IdleTimeout:             cfg.Server.IdleTimeout,
-		ErrorHandler:            handlers.CustomErrorHandler,
+		ErrorHandler:            CustomErrorHandler,
 		EnableTrustedProxyCheck: true,
-		EnableHTTP2:             true, // Enable HTTP/2 support
+		EnableHTTP2:             true,
 		ServerHeader:            "Horizon API Gateway",
 	})
 
