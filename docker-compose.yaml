@@ -5,24 +5,177 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: bimapangestu/horizon:latest
+    container_name: horizon-gateway
     ports:
       - "8080:8080"  # Main API Gateway port
       - "8081:8081"  # Admin API port
     volumes:
       - ./config.yaml:/etc/horizon/config.yaml
+      - ./plugins:/etc/horizon/plugins
+      - ./certs:/etc/horizon/certs
     environment:
-      - LOG_LEVEL=debug
+      - LOG_LEVEL=info
+      - CONFIG_PATH=/etc/horizon/config.yaml
     restart: unless-stopped
     networks:
       - horizon-net
+    depends_on:
+      - redis
+      - prometheus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # Redis for caching and rate limiting
+  redis:
+    image: redis:alpine
+    container_name: horizon-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - horizon-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: horizon-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - horizon-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: horizon-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    networks:
+      - horizon-net
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: horizon-jaeger
+    ports:
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "16686:16686"
+      - "14250:14250"
+      - "14268:14268"
+      - "14269:14269"
+      - "9411:9411"
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+    networks:
+      - horizon-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:16686/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   # Mock service for testing
   mock-service:
     image: kennethreitz/httpbin
+    container_name: horizon-mock-service
     ports:
       - "8000:80"
     networks:
       - horizon-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/status/200"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Consul for service discovery (optional)
+  consul:
+    image: consul:latest
+    container_name: horizon-consul
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    command: "agent -server -ui -node=server-1 -bootstrap-expect=1 -client=0.0.0.0"
+    restart: unless-stopped
+    networks:
+      - horizon-net
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Etcd for service discovery and storage (optional)
+  etcd:
+    image: bitnami/etcd:latest
+    container_name: horizon-etcd
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+    restart: unless-stopped
+    networks:
+      - horizon-net
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  redis-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   horizon-net:

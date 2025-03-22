@@ -7,15 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path"
-	"regexp"
-	"strings"
 
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+)
 
 type SchemaValidator struct {
 	swagger    *openapi3.T
@@ -137,17 +135,17 @@ func (v *SchemaValidator) ValidatePayload(operationID string, payload []byte, pa
 		if operation.RequestBody == nil || operation.RequestBody.Value == nil {
 			return nil, fmt.Errorf("no request body schema defined for operation %s", operationID)
 		}
-		
+
 		contentType := "application/json"
 		mediaType, exists := operation.RequestBody.Value.Content[contentType]
 		if !exists {
 			return nil, fmt.Errorf("no %s content type defined for operation %s", contentType, operationID)
 		}
-		
+
 		if mediaType.Schema == nil {
 			return nil, fmt.Errorf("no schema defined for %s in operation %s", contentType, operationID)
 		}
-		
+
 		schema = mediaType.Schema.Value
 	case "response":
 		response, exists := operation.Responses.Map()["200"]
@@ -157,20 +155,20 @@ func (v *SchemaValidator) ValidatePayload(operationID string, payload []byte, pa
 				return nil, fmt.Errorf("no 200/201 response defined for operation %s", operationID)
 			}
 		}
-		
+
 		if response.Value.Content == nil {
 			return nil, fmt.Errorf("no content defined for response in operation %s", operationID)
 		}
-		
+
 		mediaType, exists := response.Value.Content["application/json"]
 		if !exists {
 			return nil, fmt.Errorf("no application/json content type defined for response in operation %s", operationID)
 		}
-		
+
 		if mediaType.Schema == nil {
 			return nil, fmt.Errorf("no schema defined for application/json in response for operation %s", operationID)
 		}
-		
+
 		schema = mediaType.Schema.Value
 	default:
 		return nil, fmt.Errorf("invalid payload type: %s", payloadType)
@@ -188,7 +186,7 @@ func (v *SchemaValidator) ValidatePayload(operationID string, payload []byte, pa
 	if err != nil {
 		result.Valid = false
 		result.Message = fmt.Sprintf("%s validation failed", payloadType)
-		
+
 		switch e := err.(type) {
 		case *openapi3.SchemaError:
 			result.Errors = append(result.Errors, e.Error())
@@ -228,13 +226,12 @@ func (v *SchemaValidator) MapPathToOperation(method, path string) (string, error
 
 func (v *SchemaValidator) GetRoutePatterns() []string {
 	patterns := make([]string, 0)
-	
+
 	for path := range v.swagger.Paths {
 		patterns = append(patterns, path)
 	}
-	
+
 	return patterns
-}
 }
 
 func (v *SchemaValidator) ValidateResponse(req *http.Request, statusCode int, responseBody []byte) (*SchemaValidationResult, error) {
@@ -257,9 +254,9 @@ func (v *SchemaValidator) ValidateResponse(req *http.Request, statusCode int, re
 			PathParams: pathParams,
 			Route:      route,
 		},
-		Status:   statusCode,
-		Header:   responseHeaders,
-		Body:     io.NopCloser(bytes.NewReader(responseBody)),
+		Status: statusCode,
+		Header: responseHeaders,
+		Body:   io.NopCloser(bytes.NewReader(responseBody)),
 	}
 
 	if err := openapi3filter.ValidateResponse(context.Background(), responseValidationInput); err != nil {

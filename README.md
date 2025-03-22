@@ -1,13 +1,13 @@
 # Horizon API Gateway
 
-A high-performance, community-focused API Gateway built with Go.
-
 ![Horizon Logo](https://raw.githubusercontent.com/horizon-gateway/assets/main/logo.png)
 
 > A high-performance, community-focused API Gateway built with Go.
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/horizon-gateway/horizon)](https://goreportcard.com/report/github.com/horizon-gateway/horizon)
+[![Go Report Card](https://goreportcard.com/badge/github.com/BimaPangestu28/horizon-gateway)](https://goreportcard.com/report/github.com/BimaPangestu28/horizon-gateway)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/BimaPangestu28/horizon-gateway.svg)](https://github.com/BimaPangestu28/horizon-gateway/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/BimaPangestu28/horizon-gateway.svg)](https://github.com/BimaPangestu28/horizon-gateway/issues)
 
 ## 📖 Overview
 
@@ -23,37 +23,94 @@ Horizon is an open-source, enterprise-grade API Gateway designed to be simple to
 
 ## ✨ Features
 
-### Core Features (Phase 1)
+### Core Functionality
+
 - ✅ HTTP/HTTPS reverse proxy with HTTP/2 support
 - ✅ Dynamic routing based on path, headers, query params, and methods
 - ✅ Advanced load balancing (round-robin, weighted, least connections)
 - ✅ Circuit breaking and request timeouts
 - ✅ Connection pooling and keep-alive management
-- ✅ Docker and Kubernetes deployment
+- ✅ WebSocket, gRPC, and GraphQL support
+- ✅ Request/response transformation
+- ✅ Response caching with configurable strategies
 
-### Security & Performance (Phase 2)
+### Security
+
 - ✅ API key authentication
 - ✅ JWT validation and generation
-- ✅ Rate limiting and throttling with multiple algorithms
+- ✅ OAuth2 server and client
+- ✅ Rate limiting and throttling
 - ✅ IP filtering and geolocation rules
-- ✅ Request validation
+- ✅ Request validation against schemas
 - ✅ CORS management
-- ✅ Response caching with multiple strategies
+- ✅ SSL/TLS termination with automated certificate management
 
-### Management & Observability (Phase 3)
-- ✅ Admin API for complete gateway management
-- ✅ Admin UI dashboard with React and Tailwind CSS
+### Observability & Management
+
 - ✅ Structured logging (JSON format)
-- ✅ Prometheus metrics with detailed monitoring
+- ✅ Prometheus metrics
 - ✅ Distributed tracing (OpenTelemetry)
-- ✅ Configuration versioning and rollback
+- ✅ Health checks with configurable probes
 - ✅ Real-time analytics dashboard
+- ✅ Configuration API
+- ✅ Admin UI
+- ✅ Hot reload of configurations
 
-### Coming Soon (Phase 4)
-- ⬜ Plugins system
-- ⬜ WebSocket/gRPC support
-- ⬜ Service discovery
-- ⬜ Advanced transformations
+### Service Discovery
+
+- ✅ Static service discovery
+- ✅ DNS-based service discovery
+- ✅ Consul service discovery
+- ✅ Kubernetes service discovery
+- ✅ Etcd service discovery
+
+### Developer Experience
+
+- ✅ Playground/testing console
+- ✅ Comprehensive documentation
+- ✅ CLI tools for management
+- ✅ Mock services for testing
+- ✅ Debug mode with request/response inspection
+- ✅ Request replaying
+
+### Advanced Features
+
+- ✅ Plugin system
+- ✅ API aggregation
+- ✅ GraphQL federation
+- ✅ Custom validators
+- ✅ WebAssembly plugins
+- ✅ Request transformation scripting
+- ✅ High availability clustering
+
+## 🚧 Current Status
+
+Horizon is currently under active development. We've completed the implementation of our core features according to our roadmap:
+
+- **Phase 1 (Completed)**: Core proxy and routing functionality
+  - HTTP/HTTPS proxy
+  - Basic routing
+  - Load balancing
+  - Health checks
+  - Docker deployment
+
+- **Phase 2 (Completed)**: Security and performance
+  - Authentication (API keys, JWT)
+  - Rate limiting
+  - Response caching
+  - Circuit breaking
+
+- **Phase 3 (Completed)**: Management and observability
+  - Admin API
+  - Admin UI
+  - Logging and metrics
+  - Tracing
+
+- **Phase 4 (Completed)**: Advanced features
+  - Plugins system
+  - WebSocket/gRPC support
+  - Service discovery
+  - Advanced transformations
 
 ## 🛠️ Getting Started
 
@@ -61,7 +118,6 @@ Horizon is an open-source, enterprise-grade API Gateway designed to be simple to
 
 - Go 1.20 or higher
 - Docker (for containerized deployment)
-- Node.js 16+ (for Admin UI)
 
 ### Installation
 
@@ -69,17 +125,11 @@ Horizon is an open-source, enterprise-grade API Gateway designed to be simple to
 
 ```bash
 # Clone the repository
-git clone https://github.com/horizon-gateway/horizon.git
-cd horizon
+git clone https://github.com/BimaPangestu28/horizon-gateway.git
+cd horizon-gateway
 
 # Build the binary
-go build -o horizon cmd/horizon/main.go
-
-# Build the Admin UI
-cd ui
-npm install
-npm run build
-cd ..
+go build -o horizon cmd/main.go
 
 # Run with default configuration
 ./horizon
@@ -117,6 +167,87 @@ routes:
 
 See the [Configuration Guide](docs/configuration.md) for full details.
 
+## 💻 Development
+
+### Project Structure
+
+```
+horizon-gateway/
+├── cmd/                # Command line applications
+│   └── horizon/        # Main application entrypoint
+├── internal/           # Private application code
+│   ├── cache/          # Caching implementations
+│   ├── config/         # Configuration management
+│   ├── core/           # Core routing and proxy logic
+│   ├── discovery/      # Service discovery
+│   ├── errors/         # Error definitions
+│   ├── graphql/        # GraphQL support
+│   ├── grpc/           # gRPC support
+│   ├── handlers/       # HTTP request handlers
+│   ├── httphandlers/   # HTTP-specific handlers
+│   ├── interfaces/     # Common interfaces
+│   ├── middleware/     # Middleware components
+│   ├── metrics/        # Metrics collection
+│   ├── plugins/        # Plugin system
+│   ├── proxy/          # Reverse proxy functionality
+│   ├── resilience/     # Circuit breaking, retries
+│   ├── security/       # Authentication and authorization
+│   ├── server/         # HTTP server setup
+│   ├── tracing/        # Distributed tracing
+│   ├── transform/      # Request/response transformation
+│   ├── types/          # Common type definitions
+│   ├── utils/          # Utility functions
+│   ├── validator/      # Request validation
+│   └── websocket/      # WebSocket support
+├── k8s/                # Kubernetes deployment files
+├── monitoring/         # Monitoring setup files
+├── plugins/            # Plugin implementations
+│   ├── builtin/        # Built-in plugins
+│   ├── custom/         # Custom plugin examples
+│   ├── interfaces/     # Plugin interfaces
+│   ├── loader/         # Plugin loading system
+│   ├── registry/       # Plugin registry
+│   └── wasm/           # WebAssembly plugins
+├── ui/                 # Admin UI
+└── docs/               # Documentation
+```
+
+### Build & Test
+
+```bash
+# Run tests
+go test ./...
+
+# Build for development
+go build -tags dev -o horizon cmd/main.go
+
+# Run with hot reloading (requires air)
+air
+```
+
+### Development with Docker Compose
+
+```bash
+# Start development environment
+docker-compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d
+
+# View logs
+docker-compose logs -f
+
+# Rebuild and restart
+docker-compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d --build
+```
+
+### Working with Plugins
+
+```bash
+# Build plugins
+make build-plugins
+
+# Create a new plugin
+make setup-plugin
+```
+
 ## 🖥️ Admin UI
 
 Horizon includes a comprehensive Admin UI for managing all aspects of the API Gateway:
@@ -142,8 +273,32 @@ Horizon provides comprehensive observability features:
 
 ## 🤝 Contributing
 
-We welcome contributions of all kinds! See our [Contributing Guide](CONTRIBUTING.md) for details on how to get started.
+We welcome contributions of all kinds! Here's how you can contribute:
+
+1. **Fork the Repository**: Create your own fork of the project
+2. **Create a Feature Branch**: `git checkout -b feature/amazing-feature`
+3. **Make Changes**: Implement your changes following the coding standards
+4. **Run Tests**: Ensure all tests pass with `go test ./...`
+5. **Commit Changes**: Commit with a descriptive message
+6. **Push to Branch**: `git push origin feature/amazing-feature`
+7. **Open a Pull Request**: Submit your changes for review
+
+Please see our [Contributing Guide](CONTRIBUTING.md) for detailed information.
+
+### What We Need Help With
+
+- Core functionality implementation
+- Testing and bug fixes
+- Documentation improvements
+- Feature suggestions
+- UI/UX enhancements
 
 ## 📄 License
 
 Horizon API Gateway is released under the [Apache 2.0 License](LICENSE).
+
+## 🙏 Acknowledgements
+
+- Inspired by other great API gateways like Kong, Traefik, and KrakenD
+- Built with amazing open-source technologies
+- Made possible by our wonderful community contributors

@@ -13,11 +13,168 @@ config:
       enabled: false
       cert_file: /etc/horizon/tls/cert.pem
       key_file: /etc/horizon/tls/key.pem
+      auto_cert:
+        enabled: false
+        domains: ["example.com", "api.example.com"]
+        email: "admin@example.com"
+        cache_dir: "/etc/horizon/certs"
+
+  plugins:
+    directory: /etc/horizon/plugins
+    enabled:
+      - request-logger
+      - rate-limiter
+      - circuit-breaker
+
+  service_discovery:
+    default: direct
+    consul:
+      enabled: false
+      address: "localhost:8500"
+      datacenter: "dc1"
+      token: ""
+      tag_filter: ""
+      health_check: true
+      cache_ttl: 30s
+    kubernetes:
+      enabled: false
+      in_cluster: true
+      kube_config: ""
+      namespace: "default"
+      label_selector: ""
+      field_selector: ""
+      refresh_rate: 30s
+    etcd:
+      enabled: false
+      endpoints: ["localhost:2379"]
+      key_prefix: "/services"
+      username: ""
+      password: ""
+    dns:
+      enabled: false
+      domain: "service.local"
+      resolver: "8.8.8.8:53"
+      refresh_rate: 60s
+
+  observability:
+    logging:
+      level: "info"
+      format: "json"
+      output: "stdout"
+    metrics:
+      enabled: true
+      prometheus:
+        endpoint: "/metrics"
+        namespace: "horizon"
+    tracing:
+      enabled: false
+      type: "jaeger"
+      endpoint: "localhost:14268/api/traces"
+      service_name: "horizon-gateway"
+      sampling_ratio: 0.1
 
   routes:
-    # Basic route with no authentication
+    # Basic route example
+    - name: simple-api
+      listen_path: /api/*
+      upstream_url: http://simple-service:8000
+      methods: ["GET", "POST", "PUT", "DELETE"]
+      strip_path: true
+      
+    # Route with authentication
+    - name: secured-api
+      listen_path: /secure/*
+      upstream_url: http://secure-service:8000
+      methods: ["*"]
+      strip_path: true
+      auth:
+        enabled: true
+        type: api_key
+        api_key:
+          header: X-API-Key
+          in: header
+          keys:
+            - key: your-api-key-here
+              name: example-key
+              metadata:
+                owner: admin
+              scopes: ["read", "write"]
+              expires: "2024-12-31T23:59:59Z"
+    
+    # Route with JWT authentication
+    - name: jwt-api
+      listen_path: /jwt/*
+      upstream_url: http://jwt-service:8000
+      methods: ["*"]
+      strip_path: true
+      auth:
+        enabled: true
+        type: jwt
+        jwt:
+          algorithm: HS256
+          secret: your-secret-key
+          issuer: horizon-gateway
+          audience: api-clients
+          claims_to_headers:
+            sub: X-User-ID
+            role: X-User-Role
+    
+    # Route with rate limiting
+    - name: rate-limited-api
+      listen_path: /limited/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      rate_limiting:
+        enabled: true
+        type: token_bucket
+        scope: ip
+        limit: 100
+        window: 1m
+        burst_size: 120
+        response_status_code: 429
+        response_body: "Too many requests. Please try again later."
+        enable_headers: true
+    
+    # Route with caching
+    - name: cached-api
+      listen_path: /cached/*
+      upstream_url: http://service:8000
+      methods: ["GET"]
+      strip_path: true
+      caching:
+        enabled: true
+        type: memory
+        ttl: 5m
+        max_size: 2097152  # 2MB
+        methods: ["GET"]
+        cache_key_template: "{method}:{path}:{query}"
+        ignore_query_params: ["random", "nocache"]
+        vary_headers: ["Accept", "Accept-Encoding"]
+        never_cache: ["/cached/users/*/private"]
+        always_cache: ["/cached/public/*"]
+        respect_cache_control: true
+    
+    # Route with circuit breaking
+    - name: circuit-breaker-api
+      listen_path: /protected/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      circuit_breaker:
+        enabled: true
+        type: error
+        error_threshold: 50
+        minimum_requests: 20
+        sampling_window: 1m
+        open_state_duration: 30s
+        half_open_max_requests: 5
+        response_status_code: 503
+        response_body: "Service temporarily unavailable due to high error rate"
+    
+    # Route with transformation
     - name: transformed-api
-      listen_path: /api/transformed/*
+      listen_path: /transform/*
       upstream_url: http://service:8000
       methods: ["*"]
       strip_path: true
@@ -35,7 +192,7 @@ config:
           url:
             path:
               operation: regex
-              pattern: "^/api/transformed/(.*)$"
+              pattern: "^/transform/(.*)$"
               replacement: "/api/v2/$1"
             query:
               - name: debug
@@ -74,11 +231,115 @@ config:
             mapping:
               404: 200
               500: 503
-
-    # Basic route with no authentication
-    - name: admin-api
-      listen_path: /admin/*
-      upstream_url: http://admin-service:8000
+    
+    # Route with validation
+    - name: validated-api
+      listen_path: /validated/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      validation:
+        enabled: true
+        json_schema: |
+          {
+            "type": "object",
+            "required": ["name", "email"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "email": {"type": "string", "format": "email"},
+              "age": {"type": "integer", "minimum": 18}
+            }
+          }
+        content_types: ["application/json"]
+        header_rules:
+          - name: "Content-Type"
+            required: true
+          - name: "Authorization"
+            required: true
+            pattern: "^Bearer .+$"
+        query_rules:
+          - name: "version"
+            required: true
+            pattern: "^[0-9]+\\.[0-9]+$"
+    
+    # Route with WebSocket support
+    - name: websocket-api
+      listen_path: /ws/*
+      upstream_url: ws://websocket-service:8000
+      methods: ["GET"]
+      strip_path: true
+      websocket:
+        enabled: true
+        ping_interval: 30s
+        pong_wait: 60s
+        write_wait: 10s
+        max_message_size: 512000
+    
+    # Route with gRPC support
+    - name: grpc-api
+      listen_path: /grpc/*
+      upstream_url: grpc://grpc-service:50051
+      methods: ["POST"]
+      strip_path: true
+      grpc:
+        enabled: true
+        service_name: "ExampleService"
+        keep_alive: 30s
+        keep_alive_timeout: 5s
+        max_message_size: 4194304  # 4MB
+    
+    # Route with GraphQL support
+    - name: graphql-api
+      listen_path: /graphql
+      upstream_url: http://graphql-service:8000/graphql
+      methods: ["POST", "GET"]
+      strip_path: false
+      graphql:
+        enabled: true
+        query_timeout: 30s
+        max_query_size: 1048576  # 1MB
+        enable_introspection: true
+        enable_validation: true
+        enable_caching: false
+    
+    # Route with API aggregation
+    - name: aggregated-api
+      listen_path: /aggregate/*
+      methods: ["GET"]
+      strip_path: true
+      aggregation:
+        enabled: true
+        timeout: 30s
+        merge_method: "combine"
+        result_key: "data"
+        endpoints:
+          - name: users
+            url: "http://user-service:8000/users"
+            method: "GET"
+            timeout_ms: 5000
+            required: true
+          - name: products
+            url: "http://product-service:8000/products"
+            method: "GET"
+            timeout_ms: 5000
+            required: false
+    
+    # Route with service discovery
+    - name: discovered-api
+      listen_path: /discover/*
+      strip_path: true
+      methods: ["*"]
+      service_discovery:
+        enabled: true
+        type: "kubernetes"
+        service_name: "example-service"
+        namespace: "default"
+        port: 8080
+    
+    # Route with IP filtering
+    - name: ip-filtered-api
+      listen_path: /filtered/*
+      upstream_url: http://service:8000
       methods: ["*"]
       strip_path: true
       ip_filter:
@@ -88,226 +349,21 @@ config:
           - 192.168.1.0/24
           - 10.0.0.5
         response_status_code: 403
-        response_body: "Administrative API restricted to internal networks"
+        response_body: "Access restricted"
     
-    # Basic route with no authentication
-    - name: geo-restricted-api
-      listen_path: /api/restricted/*
-      upstream_url: http://service:8000
+    # Multi-target load balanced route
+    - name: load-balanced-api
+      listen_path: /balanced/*
       methods: ["*"]
       strip_path: true
-      ip_filter:
-        enabled: true
-        mode: deny
-        countries:
-          - CN
-          - RU
-          - IR
-        geo_db_path: "/etc/horizon/geoip/GeoLite2-Country.mmdb"
-        response_status_code: 451
-        response_body: "This service is not available in your country"
-    
-    # Basic route with no authentication
-    - name: monitoring-only
-      listen_path: /api/monitor/*
-      upstream_url: http://service:8000
-      methods: ["*"]
-      strip_path: true
-      ip_filter:
-        enabled: true
-        mode: deny
-        ips:
-          - 1.2.3.4
-          - 5.6.7.8
-        log_only: true
-
-    # Basic route with no authentication
-    - name: protected-api
-      listen_path: /api/protected/*
-      upstream_url: http://service:8000
-      methods: ["*"]
-      strip_path: true
-      circuit_breaker:
-        enabled: true
-        type: error
-        error_threshold: 50
-        minimum_requests: 20
-        sampling_window: 1m
-        open_state_duration: 30s
-        half_open_max_requests: 5
-        response_status_code: 503
-        response_body: "Service temporarily unavailable due to high error rate"
-    
-    # Basic route with no authentication
-    - name: concurrency-limited-api
-      listen_path: /api/high-load/*
-      upstream_url: http://service:8000
-      methods: ["*"]
-      strip_path: true
-      circuit_breaker:
-        enabled: true
-        type: concurrency
-        concurrency_limit: 100
-        response_status_code: 429
-        response_body: "Too many concurrent requests"
-    
-    # Basic route with no authentication
-    - name: hybrid-protected-api
-      listen_path: /api/critical/*
-      upstream_url: http://service:8000
-      methods: ["*"]
-      strip_path: true
-      circuit_breaker:
-        enabled: true
-        type: hybrid
-        error_threshold: 20
-        timeout_threshold: 10
-        concurrency_limit: 50
-        minimum_requests: 10
-        sampling_window: 30s
-        open_state_duration: 1m
-        half_open_max_requests: 3
-
-    # Basic route with no authentication
-    - name: cacheable-api
-      listen_path: /api/cacheable/*
-      upstream_url: http://service:8000
-      methods: ["*"]
-      strip_path: true
-      caching:
-        enabled: true
-        type: memory
-        ttl: 5m
-        max_size: 2097152  # 2MB
-        methods: ["GET"]
-        cache_key_template: "{method}:{path}:{query}"
-        ignore_query_params: ["random", "nocache"]
-        vary_headers: ["Accept", "Accept-Encoding"]
-        never_cache: ["/api/cacheable/users/*/private"]
-        always_cache: ["/api/cacheable/public/*"]
-        respect_cache_control: true
-    
-    # Route with Redis caching
-    - name: redis-cached-api
-      listen_path: /api/redis-cached/*
-      upstream_url: http://service:8000
-      methods: ["*"]
-      strip_path: true
-      caching:
-        enabled: true
-        type: redis
-        ttl: 10m
-        redis:
-          address: "redis:6379"
-          password: ""
-          db: 0
-          key_prefix: "horizon:cache:"
-
-    # Basic route with rate limiting
-    - name: rate-limited-api
-      listen_path: /api/limited/*
-      upstream_url: http://service:8000
-      methods: ["*"]
-      strip_path: true
-      rate_limiting:
-        enabled: true
-        type: token_bucket
-        scope: ip
-        limit: 100
-        window: 1m
-        burst_size: 120
-        response_status_code: 429
-        response_body: "Too many requests. Please try again later."
-        enable_headers: true
-    
-    # Basic route with authentication and rate limiting
-    - name: auth-rate-limited-api
-      listen_path: /api/auth-limited/*
-      upstream_url: http://service:8000
-      methods: ["*"]
-      strip_path: true
-      auth:
-        enabled: true
-        type: api_key
-        api_key:
-          header: X-API-Key
-          keys:
-            - key: abcdef123456
-              name: example-key
-      rate_limiting:
-        enabled: true
-        type: sliding_window
-        scope: auth
-        limit: 1000
-        window: 1h
-        enable_headers: true
-
-    # Basic route with no authentication
-    - name: secured-api
-      listen_path: /api/secure/*
-      upstream_url: http://secure-service:8000
-      methods: ["*"]
-      strip_path: true
-      auth:
-        enabled: true
-        type: api_key
-        api_key:
-          header: X-API-Key
-          in: header
-          keys:
-            - key: abcdef123456
-              name: example-key
-              metadata:
-                owner: admin
-              scopes: ["read", "write"]
-              expires: "2024-12-31T23:59:59Z"
-    
-    # Route with JWT authentication
-    - name: jwt-secured-api
-      listen_path: /api/jwt/*
-      upstream_url: http://jwt-service:8000
-      methods: ["*"]
-      strip_path: true
-      auth:
-        enabled: true
-        type: jwt
-        jwt:
-          algorithm: HS256
-          secret: my-secret-key
-          issuer: horizon-gateway
-          audience: api-clients
-          claims_to_headers:
-            sub: X-User-ID
-            role: X-User-Role
-
-    # Basic route to httpbin service
-    - name: httpbin
-      listen_path: /api/*
-      upstream_url: http://mock-service:80
-      methods: ["*"]
-      strip_path: true
-      priority: 10
-    
-    # Advanced route with multiple targets and health checks
-    - name: users-api
-      listen_path: /users/*
-      upstream_url: http://users-service:8000
-      methods: ["GET", "POST", "PUT", "DELETE"]
-      strip_path: true
-      priority: 100
-      headers:
-        "Content-Type": "application/json"
-      query_params:
-        "version": "v2"
-      host: "api.example.com"
       load_balancing:
         type: "weighted"
         targets:
-          - url: "http://users-service-1:8000"
+          - url: "http://service-1:8000"
             weight: 3
-          - url: "http://users-service-2:8000"
+          - url: "http://service-2:8000"
             weight: 2
-          - url: "http://users-service-3:8000"
+          - url: "http://service-3:8000"
             weight: 1
         health_check:
           path: "/health"
@@ -315,31 +371,3 @@ config:
           timeout: "5s"
           healthy_threshold: 2
           unhealthy_threshold: 3
-    
-    # Least connections load balancing example
-    - name: search-api
-      listen_path: /search/*
-      upstream_url: http://search-service:8000
-      methods: ["GET"]
-      strip_path: true
-      priority: 50
-      load_balancing:
-        type: "least_conn"
-        targets:
-          - url: "http://search-service-1:8000"
-          - url: "http://search-service-2:8000"
-          - url: "http://search-service-3:8000"
-        health_check:
-          path: "/health"
-          interval: "5s"
-          timeout: "2s"
-          healthy_threshold: 2
-          unhealthy_threshold: 3
-    
-    # Public API route
-    - name: jsonplaceholder
-      listen_path: /posts/*
-      upstream_url: https://jsonplaceholder.typicode.com
-      methods: ["GET", "POST"]
-      strip_path: false
-      priority: 5
