@@ -24,7 +24,7 @@ A high-performance, community-focused API Gateway built with Go.
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/horizon-gateway/horizon.git
+git clone https://github.com/bimapangestu28/horizon.git
 cd horizon
 ```
 

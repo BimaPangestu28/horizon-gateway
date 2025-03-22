@@ -5,8 +5,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/horizon-gateway/horizon/internal/resilience/circuitbreaker"
-	"github.com/horizon-gateway/horizon/internal/utils/logging"
+	"github.com/bimapangestu28/horizon/internal/resilience/circuitbreaker"
+	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
 // CircuitBreakerMiddleware creates a middleware for circuit breaking

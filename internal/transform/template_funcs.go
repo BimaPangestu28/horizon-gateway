@@ -76,13 +76,13 @@ func GetTemplateFuncs() template.FuncMap {
 		"ceil":     ceil,
 
 		// Array/slice functions
-		"first":    first,
-		"last":     last,
-		"rest":     rest,
-		"length":   length,
-		"contains": contains,
-		"map":      mapFunc,
-		"filter":   filterFunc,
+		"first":       first,
+		"last":        last,
+		"rest":        rest,
+		"length":      length,
+		"containsVal": contains, // Renamed to avoid duplicate key
+		"map":         mapFunc,
+		"filter":      filterFunc,
 
 		// Conditional functions
 		"default":  defaultValue,

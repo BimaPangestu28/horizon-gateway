@@ -1,4 +1,3 @@
-// internal/transform/response.go
 package transform
 
 import (
@@ -238,10 +237,8 @@ func (t *ResponseTransformer) transformBody(resp *http.Response) error {
 				}
 			}
 
-			// Parse and execute template
-			tmpl, err := template.New("body").
-				Funcs(t.templateFuncs).
-				Parse(t.bodyTransform.Template)
+			// Parse and execute template - using template package correctly
+			tmpl, err := template.New("responseBody").Funcs(t.templateFuncs).Parse(t.bodyTransform.Template)
 			if err != nil {
 				return err
 			}
@@ -378,7 +375,7 @@ func (t *ResponseTransformer) AddSecurityHeaders(resp *http.Response) {
 // ReplaceErrorWithCustomResponse replaces error responses with custom templates
 func (t *ResponseTransformer) ReplaceErrorWithCustomResponse(resp *http.Response, templates map[int]string) error {
 	// Check if status code has a custom template
-	template, exists := templates[resp.StatusCode]
+	templateContent, exists := templates[resp.StatusCode]
 	if !exists || resp.StatusCode < 400 {
 		return nil
 	}
@@ -398,10 +395,8 @@ func (t *ResponseTransformer) ReplaceErrorWithCustomResponse(resp *http.Response
 		"OriginalBody": string(body),
 	}
 
-	// Parse and execute template
-	tmpl, err := template.New("error").
-		Funcs(t.templateFuncs).
-		Parse(template)
+	// Parse and execute template - using template package correctly
+	tmpl, err := template.New("errorTemplate").Funcs(t.templateFuncs).Parse(templateContent)
 	if err != nil {
 		return err
 	}

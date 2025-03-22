@@ -5,8 +5,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/horizon-gateway/horizon/internal/security/ipfilter"
-	"github.com/horizon-gateway/horizon/internal/utils/logging"
+	"github.com/bimapangestu28/horizon/internal/security/ipfilter"
+	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
 // IPFilterMiddleware creates a middleware for IP filtering

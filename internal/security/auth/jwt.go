@@ -162,6 +162,11 @@ func (a *JWTAuthenticator) extractJWT(req *http.Request) string {
 	return ""
 }
 
+// AddClaimsToHeaders adds JWT claims to request headers (exported version)
+func (a *JWTAuthenticator) AddClaimsToHeaders(req *http.Request, claims map[string]interface{}) {
+	a.addClaimsToHeaders(req, claims)
+}
+
 // addClaimsToHeaders adds JWT claims to request headers
 func (a *JWTAuthenticator) addClaimsToHeaders(req *http.Request, claims map[string]interface{}) {
 	for claimKey, headerName := range a.config.ClaimsToHeaders {
@@ -182,4 +187,9 @@ func (a *JWTAuthenticator) addClaimsToHeaders(req *http.Request, claims map[stri
 			req.Header.Set(headerName, strValue)
 		}
 	}
+}
+
+// GetClaimsToHeaders returns the claims to headers mapping
+func (a *JWTAuthenticator) GetClaimsToHeaders() map[string]string {
+	return a.config.ClaimsToHeaders
 }

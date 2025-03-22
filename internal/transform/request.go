@@ -1,4 +1,3 @@
-// internal/transform/request.go
 package transform
 
 import (
@@ -382,10 +381,4 @@ func (t *RequestTransformer) transformBody(req *http.Request) error {
 	}
 
 	return nil
-}
-
-// isJSON checks if data is valid JSON
-func isJSON(data []byte) bool {
-	var js interface{}
-	return json.Unmarshal(data, &js) == nil
 }

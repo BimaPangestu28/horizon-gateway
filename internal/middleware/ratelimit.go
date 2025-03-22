@@ -6,8 +6,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/horizon-gateway/horizon/internal/security/ratelimit"
-	"github.com/horizon-gateway/horizon/internal/utils/logging"
+	"github.com/bimapangestu28/horizon/internal/security/ratelimit"
+	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
 // RateLimitMiddleware creates a middleware for rate limiting

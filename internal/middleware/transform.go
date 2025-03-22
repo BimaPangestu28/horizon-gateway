@@ -10,8 +10,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/horizon-gateway/horizon/internal/transform"
-	"github.com/horizon-gateway/horizon/internal/utils/logging"
+	"github.com/bimapangestu28/horizon/internal/transform"
+	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
 // TransformMiddleware creates middleware for request/response transformation

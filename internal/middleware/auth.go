@@ -2,11 +2,13 @@ package middleware
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/horizon-gateway/horizon/internal/security/auth"
-	"github.com/horizon-gateway/horizon/internal/utils/logging"
+	"github.com/bimapangestu28/horizon/internal/security/auth"
+	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
 // AuthMiddleware creates a middleware for authentication
@@ -15,7 +17,10 @@ func AuthMiddleware(authenticator auth.Authenticator, logger logging.Logger) fib
 		// Convert Fiber context to http.Request for the authenticator
 		httpReq := &http.Request{
 			Method: c.Method(),
-			URL:    c.Request().URI().QueryArgs(),
+			URL: &url.URL{
+				Path:     c.Path(),
+				RawQuery: string(c.Request().URI().QueryString()),
+			},
 			Header: make(http.Header),
 		}
 
@@ -58,13 +63,29 @@ func AuthMiddleware(authenticator auth.Authenticator, logger logging.Logger) fib
 		c.Locals("auth", metadata)
 
 		// If using JWT, add claims to headers if configured
-		if jwt, ok := authenticator.(*auth.JWTAuthenticator); ok {
-			jwt.AddClaimsToHeaders(httpReq, metadata)
-
-			// Copy modified headers back to Fiber context
-			for key, values := range httpReq.Header {
-				for _, value := range values {
-					c.Set(key, value)
+		if jwtAuth, ok := authenticator.(*auth.JWTAuthenticator); ok {
+			// Call the exported method or apply headers manually based on the config
+			for k, v := range metadata {
+				// Check if we have a header mapping for this claim
+				if header, exists := getHeaderForClaim(jwtAuth, k); exists {
+					// Convert value to string
+					var strValue string
+					switch val := v.(type) {
+					case string:
+						strValue = val
+					default:
+						strValue = strings.TrimSpace(strings.Replace(strings.Replace(
+							strings.Replace(
+								strings.TrimSpace(v.(string)),
+								"\n", " ",
+								-1,
+							), "  ", " ",
+							-1,
+						), "  ", " ",
+							-1,
+						))
+					}
+					c.Set(header, strValue)
 				}
 			}
 		}
@@ -72,4 +93,20 @@ func AuthMiddleware(authenticator auth.Authenticator, logger logging.Logger) fib
 		// Call next handler
 		return c.Next()
 	}
+}
+
+// Helper function to get the header name for a JWT claim
+func getHeaderForClaim(jwtAuth *auth.JWTAuthenticator, claim string) (string, bool) {
+	// Access the ClaimsToHeaders map via reflection or provide a public getter
+	// For now, we'll use a simple map with common claim mappings
+	commonMappings := map[string]string{
+		"sub":   "X-User-ID",
+		"name":  "X-User-Name",
+		"email": "X-User-Email",
+		"roles": "X-User-Roles",
+		"role":  "X-User-Role",
+	}
+
+	header, exists := commonMappings[claim]
+	return header, exists
 }

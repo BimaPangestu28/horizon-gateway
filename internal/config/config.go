@@ -7,6 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bimapangestu28/horizon/internal/cache"
+	"github.com/bimapangestu28/horizon/internal/resilience/circuitbreaker"
+	"github.com/bimapangestu28/horizon/internal/security/auth"
+	"github.com/bimapangestu28/horizon/internal/security/ipfilter"
+	"github.com/bimapangestu28/horizon/internal/security/ratelimit"
+	"github.com/bimapangestu28/horizon/internal/transform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -139,6 +145,24 @@ type RouteConfig struct {
 
 	// LoadBalancing defines load balancing settings for this route
 	LoadBalancing *LoadBalancingConfig `yaml:"load_balancing,omitempty"`
+
+	// IPFilter defines IP filtering settings for this route
+	IPFilter *ipfilter.IPFilterConfig `yaml:"ip_filter,omitempty"`
+
+	// Auth defines authentication settings for this route
+	Auth *auth.AuthConfig `yaml:"auth,omitempty"`
+
+	// RateLimiting defines rate limiting settings for this route
+	RateLimiting *ratelimit.RateLimitConfig `yaml:"rate_limiting,omitempty"`
+
+	// CircuitBreaker defines circuit breaking settings for this route
+	CircuitBreaker *circuitbreaker.CircuitBreakerConfig `yaml:"circuit_breaker,omitempty"`
+
+	// Caching defines response caching settings for this route
+	Caching *cache.CacheConfig `yaml:"caching,omitempty"`
+
+	// Transform defines request/response transformation settings for this route
+	Transform *transform.TransformConfig `yaml:"transform,omitempty"`
 }
 
 // LoadConfig reads configuration from the specified file and environment variables
