@@ -9,6 +9,8 @@ export default function RoutesList() {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
+  const [deleteRoute, setDeleteRoute] = useState(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   useEffect(() => {
     fetchRoutes();
@@ -90,24 +92,29 @@ export default function RoutesList() {
       setRoutes(sampleRoutes);
       setError(null);
     } catch (err) {
-      setError('Failed to fetch routes. Please try again.');
       console.error(err);
+      setError('Failed to fetch routes. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const deleteRoute = async (id) => {
-    if (!confirm('Are you sure you want to delete this route?')) {
-      return;
-    }
+  const handleDeleteConfirm = (route) => {
+    setDeleteRoute(route);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteRoute) return;
     
     try {
-      // In a real implementation, this would call the API
-      setRoutes(routes.filter(route => route.id !== id));
+      // In a real app, we'd call the API
+      setRoutes(routes.filter(route => route.id !== deleteRoute.id));
+      setIsDeleteModalOpen(false);
+      setDeleteRoute(null);
     } catch (err) {
       console.error(err);
-      alert('Failed to delete route. Please try again.');
+      setError('Failed to delete route. Please try again.');
     }
   };
 
@@ -184,17 +191,19 @@ export default function RoutesList() {
         </div>
       </div>
       
-      {loading ? (
-        <div className="flex justify-center items-center py-20">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
-        </div>
-      ) : error ? (
-        <div className="bg-red-50 p-4 rounded-md">
+      {error && (
+        <div className="mb-4 bg-red-50 p-4 rounded-md">
           <div className="flex">
             <div className="ml-3">
               <h3 className="text-sm font-medium text-red-800">{error}</h3>
             </div>
           </div>
+        </div>
+      )}
+      
+      {loading ? (
+        <div className="flex justify-center items-center py-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
         </div>
       ) : (
         <div className="mt-8 flex flex-col">
@@ -287,7 +296,7 @@ export default function RoutesList() {
                                 Edit
                               </Link>
                               <button
-                                onClick={() => deleteRoute(route.id)}
+                                onClick={() => handleDeleteConfirm(route)}
                                 className="text-red-600 hover:text-red-900 inline-flex items-center"
                               >
                                 <Trash2 className="w-4 h-4 mr-1" />
@@ -300,6 +309,51 @@ export default function RoutesList() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteModalOpen && deleteRoute && (
+        <div className="fixed z-10 inset-0 overflow-y-auto">
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+            </div>
+
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+            <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+              <div>
+                <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+                  <Trash2 className="h-6 w-6 text-red-600" aria-hidden="true" />
+                </div>
+                <div className="mt-3 text-center sm:mt-5">
+                  <h3 className="text-lg leading-6 font-medium text-gray-900">Delete Route</h3>
+                  <div className="mt-2">
+                    <p className="text-sm text-gray-500">
+                      Are you sure you want to delete the route "{deleteRoute.name}"? This action cannot be undone.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                <button
+                  type="button"
+                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:col-start-2 sm:text-sm"
+                  onClick={handleDelete}
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm"
+                  onClick={() => setIsDeleteModalOpen(false)}
+                >
+                  Cancel
+                </button>
               </div>
             </div>
           </div>
