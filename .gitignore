@@ -33,3 +33,24 @@ config.local.yaml
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Node.js and React
+ui/node_modules/
+ui/build/
+ui/dist/
+ui/.cache/
+ui/.env
+ui/.env.local
+ui/.env.development.local
+ui/.env.test.local
+ui/.env.production.local
+ui/npm-debug.log*
+ui/yarn-debug.log*
+ui/yarn-error.log*
+
+# Configuration backups
+config-backups/
+/tmp/horizon_config_*
+
+# Monitoring and tracing
+opentelemetry/

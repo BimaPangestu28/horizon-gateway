@@ -2,138 +2,148 @@
 
 A high-performance, community-focused API Gateway built with Go.
 
-## Features
+![Horizon Logo](https://raw.githubusercontent.com/horizon-gateway/assets/main/logo.png)
 
-### Core Features
-- HTTP/HTTPS proxy with HTTP/2 support
-- Advanced routing based on path, method, headers, query parameters, and host
-- Load balancing (round-robin, weighted, least connections)
-- Connection draining for graceful service removal
-- Health checking with circuit breaking
-- Configuration hot reload with versioning and migration
-- Docker and Kubernetes deployment
+> A high-performance, community-focused API Gateway built with Go.
 
-## Getting Started
+[![Go Report Card](https://goreportcard.com/badge/github.com/horizon-gateway/horizon)](https://goreportcard.com/report/github.com/horizon-gateway/horizon)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
+## 📖 Overview
+
+Horizon is an open-source, enterprise-grade API Gateway designed to be simple to use while offering powerful features for managing, securing, and optimizing API traffic. It's built from the ground up with performance in mind, making it suitable for both small projects and large-scale deployments.
+
+## 🚀 Why Horizon?
+
+- **Simplicity First**: Deploy and configure in minutes with sensible defaults
+- **High Performance**: Built with Go for exceptional throughput and low latency
+- **Community Driven**: 100% open source with a focus on community contributions
+- **Enterprise Ready**: Includes features typically found only in premium solutions
+- **Developer Friendly**: Comprehensive documentation and intuitive interfaces
+
+## ✨ Features
+
+### Core Features (Phase 1)
+- ✅ HTTP/HTTPS reverse proxy with HTTP/2 support
+- ✅ Dynamic routing based on path, headers, query params, and methods
+- ✅ Advanced load balancing (round-robin, weighted, least connections)
+- ✅ Circuit breaking and request timeouts
+- ✅ Connection pooling and keep-alive management
+- ✅ Docker and Kubernetes deployment
+
+### Security & Performance (Phase 2)
+- ✅ API key authentication
+- ✅ JWT validation and generation
+- ✅ Rate limiting and throttling with multiple algorithms
+- ✅ IP filtering and geolocation rules
+- ✅ Request validation
+- ✅ CORS management
+- ✅ Response caching with multiple strategies
+
+### Management & Observability (Phase 3)
+- ✅ Admin API for complete gateway management
+- ✅ Admin UI dashboard with React and Tailwind CSS
+- ✅ Structured logging (JSON format)
+- ✅ Prometheus metrics with detailed monitoring
+- ✅ Distributed tracing (OpenTelemetry)
+- ✅ Configuration versioning and rollback
+- ✅ Real-time analytics dashboard
+
+### Coming Soon (Phase 4)
+- ⬜ Plugins system
+- ⬜ WebSocket/gRPC support
+- ⬜ Service discovery
+- ⬜ Advanced transformations
+
+## 🛠️ Getting Started
+
+### Prerequisites
 
 - Go 1.20 or higher
-- Docker and Docker Compose
-- Git
+- Docker (for containerized deployment)
+- Node.js 16+ (for Admin UI)
 
-## Getting Started
+### Installation
 
-### Clone the Repository
+#### From Source
 
 ```bash
-git clone https://github.com/bimapangestu28/horizon.git
+# Clone the repository
+git clone https://github.com/horizon-gateway/horizon.git
 cd horizon
-```
 
-### Building the Project
-
-Build the project locally:
-
-```bash
+# Build the binary
 go build -o horizon cmd/horizon/main.go
-```
 
-### Running the Gateway
+# Build the Admin UI
+cd ui
+npm install
+npm run build
+cd ..
 
-Run the gateway directly:
-
-```bash
+# Run with default configuration
 ./horizon
 ```
 
-The gateway will start with default configuration:
-- Main port: 8080
-- Admin port: 8081
-
-### Using Docker
-
-Build and run using Docker:
+#### Using Docker
 
 ```bash
-docker build -t horizon .
-docker run -p 8080:8080 -p 8081:8081 -v $(pwd)/config.yaml:/etc/horizon/config.yaml horizon
+docker run -p 8080:8080 -p 8081:8081 \
+  -v $(pwd)/config.yaml:/etc/horizon/config.yaml \
+  horizongateway/horizon:latest
 ```
 
-### Using Docker Compose
+### Basic Configuration
 
-```bash
-docker-compose up -d
+Create a `config.yaml` file:
+
+```yaml
+server:
+  port: 8080
+  admin_port: 8081
+
+routes:
+  - name: example-api
+    listen_path: /api/*
+    upstream_url: http://api.example.com
+    methods: ["GET", "POST"]
+    
+  - name: another-service
+    listen_path: /service/*
+    upstream_url: http://service.internal
+    strip_path: true
+    methods: ["*"]
 ```
 
-This will start the gateway and a mock service for testing.
+See the [Configuration Guide](docs/configuration.md) for full details.
 
-## Development
+## 🖥️ Admin UI
 
-### Project Structure
+Horizon includes a comprehensive Admin UI for managing all aspects of the API Gateway:
 
-```
-horizon/
-├── cmd/                # Command line applications
-│   └── horizon/        # Main application entrypoint
-│       └── main.go
-├── internal/           # Private application code
-│   ├── config/         # Configuration management
-│   ├── core/           # Core gateway functionality
-│   ├── handlers/       # HTTP handlers
-│   ├── middleware/     # Middleware components
-│   └── utils/          # Utility functions
-├── config.yaml         # Default configuration
-├── Dockerfile          # Docker build instructions
-├── docker-compose.yml  # Docker Compose setup
-├── go.mod              # Go module definition
-├── go.sum              # Go module checksums
-└── .air.toml           # Configuration for hot reload
-```
+- **Dashboard**: Real-time metrics and gateway status
+- **Routes Management**: Create, edit, and delete API routes
+- **Authentication**: Manage API keys and JWT configurations
+- **Rate Limiting**: Configure rate limits for your APIs
+- **Circuit Breakers**: Control failure handling and graceful degradation
+- **Caching**: Optimize performance with response caching
+- **Analytics**: Visualize traffic patterns and error rates
 
-### Development with Hot Reload
+To access the Admin UI, navigate to `http://localhost:8081` after starting Horizon.
 
-For development with automatic rebuilding and restarting when code changes:
+## 📊 Observability
 
-1. Install Air:
-```bash
-go install github.com/air-verse/air@latest
-```
+Horizon provides comprehensive observability features:
 
-2. Run the setup-dev make target to set up the development environment:
-```bash
-make setup-dev
-```
+- **Metrics**: Prometheus-compatible metrics endpoint at `/metrics`
+- **Logs**: Structured JSON logs for easy parsing and analysis
+- **Tracing**: OpenTelemetry integration with support for Jaeger, Zipkin, and more
+- **Health Checks**: Advanced health check endpoints for monitoring
 
-3. Run the gateway with hot reload:
-```bash
-make dev-hot
-```
+## 🤝 Contributing
 
-Air will monitor your source code files and automatically rebuild and restart the gateway when changes are detected.
+We welcome contributions of all kinds! See our [Contributing Guide](CONTRIBUTING.md) for details on how to get started.
 
-### Testing the Gateway
+## 📄 License
 
-Once running, you can test the gateway with:
-
-```bash
-# Test the health endpoint
-curl http://localhost:8080/health
-
-# Test proxying through the gateway
-curl http://localhost:8080/api/get
-
-# Test the admin API
-curl http://localhost:8081/admin/routes
-```
-
-## Configuration
-
-The gateway is configured via a YAML file. By default, it looks for `config.yaml` in the current directory, but you can specify a different path:
-
-```bash
-./horizon /path/to/config.yaml
-```
-
-See the example config file for available options.
-
-## Contributing
-
-Please follow the code standards and git branching strategy as defined in the project documentation when contributing to this project.
+Horizon API Gateway is released under the [Apache 2.0 License](LICENSE).
