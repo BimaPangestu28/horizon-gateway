@@ -15,6 +15,271 @@ config:
       key_file: /etc/horizon/tls/key.pem
 
   routes:
+    # Basic route with no authentication
+    - name: transformed-api
+      listen_path: /api/transformed/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      transform:
+        enabled: true
+        request:
+          headers:
+            - name: X-API-Version
+              operation: add
+              value: "2.0"
+            - name: User-Agent
+              operation: regex
+              pattern: "^(.*)$"
+              replacement: "Modified-$1"
+          url:
+            path:
+              operation: regex
+              pattern: "^/api/transformed/(.*)$"
+              replacement: "/api/v2/$1"
+            query:
+              - name: debug
+                operation: remove
+              - name: version
+                operation: add
+                value: "2.0"
+          body:
+            operation: jsonpath
+            content_types: ["application/json"]
+            jsonpath:
+              - path: "$.user.id"
+                operation: replace
+                value: "anonymous"
+              - path: "$.sensitive"
+                operation: remove
+        response:
+          headers:
+            - name: X-Powered-By
+              operation: remove
+            - name: Cache-Control
+              operation: add
+              value: "public, max-age=3600"
+          body:
+            operation: template
+            content_types: ["application/json"]
+            template: |
+              {
+                "data": {{ .Body }},
+                "meta": {
+                  "status": {{ .StatusCode }},
+                  "timestamp": "{{ now }}"
+                }
+              }
+          status_code:
+            mapping:
+              404: 200
+              500: 503
+
+    # Basic route with no authentication
+    - name: admin-api
+      listen_path: /admin/*
+      upstream_url: http://admin-service:8000
+      methods: ["*"]
+      strip_path: true
+      ip_filter:
+        enabled: true
+        mode: allow
+        ips:
+          - 192.168.1.0/24
+          - 10.0.0.5
+        response_status_code: 403
+        response_body: "Administrative API restricted to internal networks"
+    
+    # Basic route with no authentication
+    - name: geo-restricted-api
+      listen_path: /api/restricted/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      ip_filter:
+        enabled: true
+        mode: deny
+        countries:
+          - CN
+          - RU
+          - IR
+        geo_db_path: "/etc/horizon/geoip/GeoLite2-Country.mmdb"
+        response_status_code: 451
+        response_body: "This service is not available in your country"
+    
+    # Basic route with no authentication
+    - name: monitoring-only
+      listen_path: /api/monitor/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      ip_filter:
+        enabled: true
+        mode: deny
+        ips:
+          - 1.2.3.4
+          - 5.6.7.8
+        log_only: true
+
+    # Basic route with no authentication
+    - name: protected-api
+      listen_path: /api/protected/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      circuit_breaker:
+        enabled: true
+        type: error
+        error_threshold: 50
+        minimum_requests: 20
+        sampling_window: 1m
+        open_state_duration: 30s
+        half_open_max_requests: 5
+        response_status_code: 503
+        response_body: "Service temporarily unavailable due to high error rate"
+    
+    # Basic route with no authentication
+    - name: concurrency-limited-api
+      listen_path: /api/high-load/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      circuit_breaker:
+        enabled: true
+        type: concurrency
+        concurrency_limit: 100
+        response_status_code: 429
+        response_body: "Too many concurrent requests"
+    
+    # Basic route with no authentication
+    - name: hybrid-protected-api
+      listen_path: /api/critical/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      circuit_breaker:
+        enabled: true
+        type: hybrid
+        error_threshold: 20
+        timeout_threshold: 10
+        concurrency_limit: 50
+        minimum_requests: 10
+        sampling_window: 30s
+        open_state_duration: 1m
+        half_open_max_requests: 3
+
+    # Basic route with no authentication
+    - name: cacheable-api
+      listen_path: /api/cacheable/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      caching:
+        enabled: true
+        type: memory
+        ttl: 5m
+        max_size: 2097152  # 2MB
+        methods: ["GET"]
+        cache_key_template: "{method}:{path}:{query}"
+        ignore_query_params: ["random", "nocache"]
+        vary_headers: ["Accept", "Accept-Encoding"]
+        never_cache: ["/api/cacheable/users/*/private"]
+        always_cache: ["/api/cacheable/public/*"]
+        respect_cache_control: true
+    
+    # Route with Redis caching
+    - name: redis-cached-api
+      listen_path: /api/redis-cached/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      caching:
+        enabled: true
+        type: redis
+        ttl: 10m
+        redis:
+          address: "redis:6379"
+          password: ""
+          db: 0
+          key_prefix: "horizon:cache:"
+
+    # Basic route with rate limiting
+    - name: rate-limited-api
+      listen_path: /api/limited/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      rate_limiting:
+        enabled: true
+        type: token_bucket
+        scope: ip
+        limit: 100
+        window: 1m
+        burst_size: 120
+        response_status_code: 429
+        response_body: "Too many requests. Please try again later."
+        enable_headers: true
+    
+    # Basic route with authentication and rate limiting
+    - name: auth-rate-limited-api
+      listen_path: /api/auth-limited/*
+      upstream_url: http://service:8000
+      methods: ["*"]
+      strip_path: true
+      auth:
+        enabled: true
+        type: api_key
+        api_key:
+          header: X-API-Key
+          keys:
+            - key: abcdef123456
+              name: example-key
+      rate_limiting:
+        enabled: true
+        type: sliding_window
+        scope: auth
+        limit: 1000
+        window: 1h
+        enable_headers: true
+
+    # Basic route with no authentication
+    - name: secured-api
+      listen_path: /api/secure/*
+      upstream_url: http://secure-service:8000
+      methods: ["*"]
+      strip_path: true
+      auth:
+        enabled: true
+        type: api_key
+        api_key:
+          header: X-API-Key
+          in: header
+          keys:
+            - key: abcdef123456
+              name: example-key
+              metadata:
+                owner: admin
+              scopes: ["read", "write"]
+              expires: "2024-12-31T23:59:59Z"
+    
+    # Route with JWT authentication
+    - name: jwt-secured-api
+      listen_path: /api/jwt/*
+      upstream_url: http://jwt-service:8000
+      methods: ["*"]
+      strip_path: true
+      auth:
+        enabled: true
+        type: jwt
+        jwt:
+          algorithm: HS256
+          secret: my-secret-key
+          issuer: horizon-gateway
+          audience: api-clients
+          claims_to_headers:
+            sub: X-User-ID
+            role: X-User-Role
+
     # Basic route to httpbin service
     - name: httpbin
       listen_path: /api/*

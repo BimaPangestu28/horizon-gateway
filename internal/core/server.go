@@ -10,10 +10,14 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 
+	"github.com/bimapangestu28/horizon/internal/cache"
 	"github.com/bimapangestu28/horizon/internal/config"
 	"github.com/bimapangestu28/horizon/internal/handlers"
 	"github.com/bimapangestu28/horizon/internal/interfaces"
 	"github.com/bimapangestu28/horizon/internal/middleware"
+	"github.com/bimapangestu28/horizon/internal/resilience/circuitbreaker"
+	"github.com/bimapangestu28/horizon/internal/security/ipfilter"
+	"github.com/bimapangestu28/horizon/internal/security/ratelimit"
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
@@ -132,6 +136,96 @@ func (s *Server) registerRoutes() {
 
 	// Set up catch-all route for API Gateway proxying
 	s.app.All("/*", proxyHandler.HandleRequest)
+
+	for _, route := range s.config.Routes {
+		// Create handlers chain for this route
+		handlers := make([]fiber.Handler, 0)
+
+		// 1. Create IP filter if configured for this route
+		if route.IPFilter != nil && route.IPFilter.Enabled {
+			ipFilter, err := ipfilter.NewIPFilter(route.IPFilter)
+			if err != nil {
+				s.logger.Error("Failed to create IP filter", "route", route.Name, "error", err)
+				continue
+			}
+
+			// Add IP filter middleware to handlers chain
+			handlers = append(handlers, middleware.IPFilterMiddleware(ipFilter, s.logger))
+		}
+
+		// 2. Add authentication middleware if configured
+		if route.Auth != nil && route.Auth.Enabled {
+			auth, err := auth.NewAuthenticator(route.Auth)
+			if err != nil {
+				s.logger.Error("Failed to create authenticator", "route", route.Name, "error", err)
+				continue
+			}
+
+			handlers = append(handlers, middleware.AuthMiddleware(auth, s.logger))
+		}
+
+		// 3. Add rate limiting middleware if configured
+		if route.RateLimiting != nil && route.RateLimiting.Enabled {
+			rateLimiter, err := ratelimit.NewRateLimiter(route.RateLimiting)
+			if err != nil {
+				s.logger.Error("Failed to create rate limiter", "route", route.Name, "error", err)
+				continue
+			}
+
+			handlers = append(handlers, middleware.RateLimitMiddleware(rateLimiter, s.logger))
+		}
+
+		// 4. Add circuit breaker middleware if configured
+		if route.CircuitBreaker != nil && route.CircuitBreaker.Enabled {
+			breaker, err := circuitbreaker.NewCircuitBreaker(route.CircuitBreaker)
+			if err != nil {
+				s.logger.Error("Failed to create circuit breaker", "route", route.Name, "error", err)
+				continue
+			}
+
+			handlers = append(handlers, middleware.CircuitBreakerMiddleware(breaker, s.logger))
+		}
+
+		// 5. Add caching middleware if configured
+		if route.Caching != nil && route.Caching.Enabled {
+			cache, err := cache.NewCache(route.Caching)
+			if err != nil {
+				s.logger.Error("Failed to create cache", "route", route.Name, "error", err)
+				continue
+			}
+
+			handlers = append(handlers, middleware.CacheMiddleware(cache, s.logger))
+		}
+
+		// 6. Add transformation middleware if configured
+		if route.Transform != nil && route.Transform.Enabled {
+			reqTransformer, err := transform.NewRequestTransformer(route.Transform)
+			if err != nil {
+				s.logger.Error("Failed to create request transformer", "route", route.Name, "error", err)
+				continue
+			}
+
+			respTransformer, err := transform.NewResponseTransformer(route.Transform)
+			if err != nil {
+				s.logger.Error("Failed to create response transformer", "route", route.Name, "error", err)
+				continue
+			}
+
+			handlers = append(handlers, middleware.TransformMiddleware(reqTransformer, respTransformer, s.logger))
+		}
+
+		// 7. Finally, add the proxy handler itself
+		handlers = append(handlers, s.proxyHandler.HandleRequest)
+
+		// 8. Register the route with all its middleware handlers
+		routePath := route.ListenPath
+		s.app.All(routePath, handlers...)
+
+		s.logger.Info("Registered route with middleware",
+			"route", route.Name,
+			"path", routePath,
+			"middleware_count", len(handlers)-1) // Minus one to exclude the proxy handler
+	}
 }
 
 // registerAdminRoutes sets up the admin API routes
