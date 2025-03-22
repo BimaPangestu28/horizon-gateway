@@ -2,17 +2,18 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bimapangestu28/horizon/internal/interfaces"
-	"github.com/bimapangestu28/horizon/internal/types"
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -23,438 +24,320 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// ProxyHandler represents a gRPC proxy handler
-type ProxyHandler struct {
-	router       interfaces.Router
-	logger       logging.Logger
-	server       *grpc.Server
-	descriptors  map[string]*descriptorMap
-	connections  map[string]*grpc.ClientConn
-	connMutex    sync.RWMutex
-	interceptors []grpc.UnaryServerInterceptor
-	metrics      *GRPCMetrics
-	addr         string
-	port         int
-	tlsEnabled   bool
-	certFile     string
-	keyFile      string
-	initialized  bool
-	listeners    []net.Listener
+var (
+	ErrGRPCNotEnabled  = errors.New("gRPC is not enabled for this route")
+	ErrServiceNotFound = errors.New("service not found")
+	ErrMethodNotFound  = errors.New("method not found")
+	ErrInvalidRequest  = errors.New("invalid request")
+	ErrUpstreamFailure = errors.New("upstream service failure")
+)
+
+type GRPCProxy struct {
+	router        interfaces.Router
+	logger        logging.Logger
+	server        *grpc.Server
+	connections   map[string]*grpc.ClientConn
+	connMutex     sync.RWMutex
+	metrics       *GRPCMetrics
+	port          int
+	serverStarted bool
+	listeners     []net.Listener
 }
 
-// descriptorMap maps service names to their method descriptors
-type descriptorMap struct {
-	serviceDesc *grpc.ServiceDesc
-	methods     map[string]*methodInfo
-}
-
-// methodInfo holds information about a gRPC method
-type methodInfo struct {
-	methodName     string
-	serviceName    string
-	isClientStream bool
-	isServerStream bool
-	handler        grpc.MethodDesc
-}
-
-// GRPCMetrics tracks gRPC metrics
 type GRPCMetrics struct {
-	RequestsTotal  int64
-	ErrorsTotal    int64
-	ErrorsByCode   map[codes.Code]int64
-	RequestLatency []time.Duration
-	ActiveRequests int64
-	mu             sync.Mutex
+	RequestsTotal    int64
+	RequestsActive   int64
+	RequestLatencies []time.Duration
+	ErrorsTotal      int64
+	ErrorsByCode     map[codes.Code]int64
+	ServiceCalls     map[string]int64
+	mutex            sync.Mutex
 }
 
-// NewProxyHandler creates a new gRPC proxy handler
-func NewProxyHandler(router interfaces.Router, logger logging.Logger, port int) *ProxyHandler {
+func NewGRPCProxy(router interfaces.Router, logger logging.Logger, port int) *GRPCProxy {
 	metrics := &GRPCMetrics{
-		ErrorsByCode:   make(map[codes.Code]int64),
-		RequestLatency: make([]time.Duration, 0, 100),
+		RequestLatencies: make([]time.Duration, 0, 100),
+		ErrorsByCode:     make(map[codes.Code]int64),
+		ServiceCalls:     make(map[string]int64),
 	}
 
-	return &ProxyHandler{
-		router:       router,
-		logger:       logger,
-		descriptors:  make(map[string]*descriptorMap),
-		connections:  make(map[string]*grpc.ClientConn),
-		interceptors: make([]grpc.UnaryServerInterceptor, 0),
-		metrics:      metrics,
-		port:         port,
-		initialized:  false,
-		listeners:    make([]net.Listener, 0),
+	return &GRPCProxy{
+		router:        router,
+		logger:        logger,
+		connections:   make(map[string]*grpc.ClientConn),
+		metrics:       metrics,
+		port:          port,
+		serverStarted: false,
+		listeners:     make([]net.Listener, 0),
 	}
 }
 
-// Initialize initializes the gRPC server
-func (h *ProxyHandler) Initialize() error {
-	if h.initialized {
-		return nil
+func (p *GRPCProxy) Initialize() error {
+	serverOptions := []grpc.ServerOption{
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle:     15 * time.Minute,
+			MaxConnectionAge:      30 * time.Minute,
+			MaxConnectionAgeGrace: 5 * time.Second,
+			Time:                  5 * time.Minute,
+			Timeout:               20 * time.Second,
+		}),
+		grpc.ChainUnaryInterceptor(
+			p.loggingInterceptor,
+			p.metricsInterceptor,
+		),
 	}
 
-	// Create server options
-	var opts []grpc.ServerOption
+	p.server = grpc.NewServer(serverOptions...)
 
-	// Add keepalive options
-	opts = append(opts, grpc.KeepaliveParams(keepalive.ServerParameters{
-		MaxConnectionIdle:     15 * time.Minute,
-		MaxConnectionAge:      30 * time.Minute,
-		MaxConnectionAgeGrace: 5 * time.Second,
-		Time:                  5 * time.Minute,
-		Timeout:               20 * time.Second,
-	}))
+	grpc.UnknownServiceHandler(p.server, p.handleUnknownService)
+	reflection.Register(p.server)
 
-	// Add interceptors
-	opts = append(opts, grpc.ChainUnaryInterceptor(h.loggingInterceptor, h.metricInterceptor))
-
-	// Add TLS if configured
-	if h.tlsEnabled {
-		creds, err := credentials.NewServerTLSFromFile(h.certFile, h.keyFile)
-		if err != nil {
-			return fmt.Errorf("failed to create TLS credentials: %w", err)
-		}
-		opts = append(opts, grpc.Creds(creds))
-	}
-
-	// Create server
-	h.server = grpc.NewServer(opts...)
-
-	// Register unknown service handler
-	grpc.RegisterUnknownServiceHandler(h.server, h.handleUnknownService)
-
-	// Enable reflection service
-	reflection.Register(h.server)
-
-	h.initialized = true
 	return nil
 }
 
-// Start starts the gRPC server
-func (h *ProxyHandler) Start() error {
-	if !h.initialized {
-		if err := h.Initialize(); err != nil {
+func (p *GRPCProxy) Start() error {
+	if p.serverStarted {
+		return nil
+	}
+
+	if p.server == nil {
+		if err := p.Initialize(); err != nil {
 			return err
 		}
 	}
 
-	// Create listener
-	addr := fmt.Sprintf(":%d", h.port)
-	listener, err := net.Listen("tcp", addr)
+	address := fmt.Sprintf(":%d", p.port)
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
-		return fmt.Errorf("failed to create gRPC listener on %s: %w", addr, err)
+		return fmt.Errorf("failed to listen on %s: %w", address, err)
 	}
 
-	h.listeners = append(h.listeners, listener)
-	h.addr = addr
+	p.listeners = append(p.listeners, listener)
+	p.serverStarted = true
 
-	h.logger.Info("Starting gRPC server", "addr", addr)
+	p.logger.Info("Starting gRPC server", "address", address)
 
-	// Serve in a goroutine
 	go func() {
-		if err := h.server.Serve(listener); err != nil {
-			h.logger.Error("gRPC server error", "error", err)
+		if err := p.server.Serve(listener); err != nil {
+			p.logger.Error("gRPC server error", "error", err)
 		}
 	}()
 
 	return nil
 }
 
-// Stop stops the gRPC server
-func (h *ProxyHandler) Stop() error {
-	if h.server != nil {
-		h.server.GracefulStop()
+func (p *GRPCProxy) Stop() error {
+	if !p.serverStarted {
+		return nil
 	}
 
-	h.connMutex.Lock()
-	defer h.connMutex.Unlock()
+	p.server.GracefulStop()
+	p.serverStarted = false
 
-	for addr, conn := range h.connections {
+	p.connMutex.Lock()
+	defer p.connMutex.Unlock()
+
+	for address, conn := range p.connections {
 		if err := conn.Close(); err != nil {
-			h.logger.Error("Error closing gRPC connection", "addr", addr, "error", err)
+			p.logger.Error("Error closing gRPC connection", "address", address, "error", err)
 		}
 	}
 
-	for _, listener := range h.listeners {
-		if err := listener.Close(); err != nil {
-			h.logger.Error("Error closing gRPC listener", "error", err)
-		}
-	}
-
-	h.initialized = false
 	return nil
 }
 
-// loggingInterceptor logs incoming gRPC requests
-func (h *ProxyHandler) loggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	start := time.Now()
-	h.logger.Info("gRPC request received",
+func (p *GRPCProxy) loggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	startTime := time.Now()
+
+	p.logger.Info("gRPC request received",
 		"method", info.FullMethod,
-		"client", getClientAddress(ctx))
+		"client_addr", getClientAddress(ctx))
 
 	resp, err := handler(ctx, req)
 
-	duration := time.Since(start)
+	duration := time.Since(startTime)
 	if err != nil {
 		st, _ := status.FromError(err)
-		h.logger.Error("gRPC request error",
+		p.logger.Error("gRPC request failed",
 			"method", info.FullMethod,
-			"client", getClientAddress(ctx),
-			"duration", duration,
-			"code", st.Code(),
+			"code", st.Code().String(),
+			"duration_ms", duration.Milliseconds(),
 			"error", err)
 	} else {
-		h.logger.Info("gRPC request completed",
+		p.logger.Info("gRPC request completed",
 			"method", info.FullMethod,
-			"client", getClientAddress(ctx),
-			"duration", duration)
+			"duration_ms", duration.Milliseconds())
 	}
 
 	return resp, err
 }
 
-// metricInterceptor collects metrics for gRPC requests
-func (h *ProxyHandler) metricInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	h.metrics.mu.Lock()
-	h.metrics.RequestsTotal++
-	h.metrics.ActiveRequests++
-	h.metrics.mu.Unlock()
+func (p *GRPCProxy) metricsInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	p.metrics.mutex.Lock()
+	p.metrics.RequestsTotal++
+	p.metrics.RequestsActive++
+	serviceName := extractServiceFromMethod(info.FullMethod)
+	p.metrics.ServiceCalls[serviceName]++
+	p.metrics.mutex.Unlock()
 
-	start := time.Now()
+	startTime := time.Now()
 	resp, err := handler(ctx, req)
-	duration := time.Since(start)
+	duration := time.Since(startTime)
 
-	h.metrics.mu.Lock()
-	h.metrics.ActiveRequests--
-	h.metrics.RequestLatency = append(h.metrics.RequestLatency, duration)
-	if err != nil {
-		h.metrics.ErrorsTotal++
-		st, _ := status.FromError(err)
-		h.metrics.ErrorsByCode[st.Code()]++
+	p.metrics.mutex.Lock()
+	p.metrics.RequestsActive--
+	p.metrics.RequestLatencies = append(p.metrics.RequestLatencies, duration)
+
+	if len(p.metrics.RequestLatencies) > 1000 {
+		p.metrics.RequestLatencies = p.metrics.RequestLatencies[len(p.metrics.RequestLatencies)-1000:]
 	}
-	h.metrics.mu.Unlock()
+
+	if err != nil {
+		p.metrics.ErrorsTotal++
+		st, _ := status.FromError(err)
+		p.metrics.ErrorsByCode[st.Code()]++
+	}
+	p.metrics.mutex.Unlock()
 
 	return resp, err
 }
 
-// handleUnknownService handles requests for services that aren't explicitly registered
-func (h *ProxyHandler) handleUnknownService(srv interface{}, stream grpc.ServerStream) error {
-	fullMethodName, ok := grpc.MethodFromServerStream(stream)
+func (p *GRPCProxy) handleUnknownService(srv interface{}, stream grpc.ServerStream) error {
+	fullMethod, ok := grpc.MethodFromServerStream(stream)
 	if !ok {
-		return status.Errorf(codes.Internal, "method name not found in stream context")
+		return status.Error(codes.Internal, "failed to get method from stream")
 	}
 
-	// Parse method and service name
-	serviceName, methodName := parseMethodName(fullMethodName)
+	serviceName, methodName := splitMethodName(fullMethod)
 	if serviceName == "" || methodName == "" {
-		return status.Errorf(codes.InvalidArgument, "invalid method name format: %s", fullMethodName)
+		return status.Errorf(codes.InvalidArgument, "invalid method name format: %s", fullMethod)
 	}
 
-	h.logger.Info("Handling gRPC proxy request",
-		"method", fullMethodName,
+	p.logger.Info("Handling gRPC request",
+		"full_method", fullMethod,
 		"service", serviceName,
 		"method", methodName)
 
-	// Get metadata from context
 	md, _ := metadata.FromIncomingContext(stream.Context())
-
-	// Create a new context with incoming metadata
 	outCtx := metadata.NewOutgoingContext(stream.Context(), md)
 
-	// Create HTTP request route path for router
-	routePath := fmt.Sprintf("/grpc/%s/%s", serviceName, methodName)
+	route, err := p.findRoute(serviceName, methodName)
+	if err != nil {
+		return status.Errorf(codes.NotFound, "service route not found: %s", err.Error())
+	}
 
-	// Find route for this service
+	grpcConfig, ok := route["grpc"].(map[string]interface{})
+	if !ok || !isGRPCEnabled(grpcConfig) {
+		return status.Errorf(codes.Unimplemented, "gRPC not enabled for route")
+	}
+
+	upstreamConn, err := p.getUpstreamConnection(route)
+	if err != nil {
+		p.logger.Error("Failed to connect to upstream",
+			"service", serviceName,
+			"error", err)
+		return status.Errorf(codes.Unavailable, "upstream connection failed: %v", err)
+	}
+
+	isClientStream, isServerStream := checkStreamingType(stream)
+
+	clientStream, err := createClientStream(upstreamConn, outCtx, fullMethod, isClientStream, isServerStream)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to create upstream stream: %v", err)
+	}
+
+	return proxyStream(stream, clientStream)
+}
+
+func (p *GRPCProxy) findRoute(serviceName, methodName string) (map[string]interface{}, error) {
+	httpPath := fmt.Sprintf("/grpc/%s/%s", serviceName, methodName)
+
 	httpReq := &http.Request{
 		Method: "POST",
 		URL: &url.URL{
-			Path: routePath,
+			Path: httpPath,
 		},
 		Header: http.Header{
 			"Content-Type": []string{"application/grpc"},
 		},
-		Host: getClientAddress(stream.Context()),
 	}
 
-	// Pass headers from metadata to HTTP request
-	for k, vs := range md {
-		for _, v := range vs {
-			httpReq.Header.Add(k, v)
-		}
-	}
-
-	route, err := h.router.FindRoute(httpReq)
+	route, err := p.router.FindRoute(httpReq)
 	if err != nil {
-		return status.Errorf(codes.NotFound, "no route found for service %s", serviceName)
+		return nil, err
 	}
 
-	// Check if gRPC is enabled for this route
-	if route.GRPC == nil || !route.GRPC.Enabled {
-		return status.Errorf(codes.Unimplemented, "gRPC not enabled for route %s", route.Name)
-	}
-
-	// Get upstream connection
-	conn, err := h.getUpstreamConnection(route, serviceName)
-	if err != nil {
-		h.logger.Error("Failed to get upstream connection",
-			"route", route.Name,
-			"service", serviceName,
-			"error", err)
-		return status.Errorf(codes.Unavailable, "failed to connect to upstream service")
-	}
-
-	// Create client stream
-	clientStream, err := conn.NewStream(outCtx, &grpc.StreamDesc{
-		ServerStreams: stream.FullMethod().isServerStream,
-		ClientStreams: stream.FullMethod().isClientStream,
-	}, fullMethodName)
-	if err != nil {
-		return status.Errorf(codes.Internal, "failed to create client stream: %v", err)
-	}
-
-	// Proxy data between client and upstream service
-	return h.proxyStreams(stream, clientStream)
+	return route, nil
 }
 
-// getUpstreamConnection gets or creates a connection to an upstream gRPC service
-func (h *ProxyHandler) getUpstreamConnection(route *types.Route, serviceName string) (*grpc.ClientConn, error) {
-	// Get upstream URL from route
-	upstreamURL := route.GRPC.UpstreamURL
-	if upstreamURL == "" {
-		upstreamURL = route.UpstreamURL
-	}
-
-	h.connMutex.RLock()
-	conn, exists := h.connections[upstreamURL]
-	h.connMutex.RUnlock()
-
-	if exists {
-		return conn, nil
-	}
-
-	h.connMutex.Lock()
-	defer h.connMutex.Unlock()
-
-	// Check again after acquiring the write lock
-	conn, exists = h.connections[upstreamURL]
-	if exists {
-		return conn, nil
-	}
-
-	// Create connection options
-	opts := []grpc.DialOption{
-		grpc.WithBlock(),
-	}
-
-	// Add keepalive options
-	if route.GRPC.KeepAlive > 0 {
-		opts = append(opts, grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                route.GRPC.KeepAlive,
-			Timeout:             route.GRPC.KeepAliveTimeout,
-			PermitWithoutStream: true,
-		}))
-	}
-
-	// Add TLS if needed
-	if strings.HasPrefix(upstreamURL, "https://") {
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
-	} else {
-		opts = append(opts, grpc.WithInsecure())
-	}
-
-	// Create max message size option if configured
-	if route.GRPC.MaxMessageSize > 0 {
-		opts = append(opts, grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(route.GRPC.MaxMessageSize),
-			grpc.MaxCallSendMsgSize(route.GRPC.MaxMessageSize),
-		))
-	}
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Connect to upstream service
-	conn, err := grpc.DialContext(ctx, upstreamURL, opts...)
+func (p *GRPCProxy) getUpstreamConnection(route map[string]interface{}) (*grpc.ClientConn, error) {
+	upstreamURL, err := getUpstreamURL(route)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to upstream gRPC service: %w", err)
+		return nil, err
 	}
 
-	// Store connection for reuse
-	h.connections[upstreamURL] = conn
+	p.connMutex.RLock()
+	conn, exists := p.connections[upstreamURL]
+	p.connMutex.RUnlock()
+
+	if exists {
+		return conn, nil
+	}
+
+	p.connMutex.Lock()
+	defer p.connMutex.Unlock()
+
+	conn, exists = p.connections[upstreamURL]
+	if exists {
+		return conn, nil
+	}
+
+	grpcConfig, _ := route["grpc"].(map[string]interface{})
+	options := []grpc.DialOption{
+		grpc.WithBlock(),
+		grpc.WithTimeout(10 * time.Second),
+	}
+
+	if strings.HasPrefix(upstreamURL, "https://") || strings.HasPrefix(upstreamURL, "grpcs://") {
+		options = append(options, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
+	} else {
+		options = append(options, grpc.WithInsecure())
+	}
+
+	maxSize := getMaxMessageSize(grpcConfig)
+	if maxSize > 0 {
+		options = append(options,
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(maxSize),
+				grpc.MaxCallSendMsgSize(maxSize),
+			),
+		)
+	}
+
+	cleanURL := cleanupGRPCURL(upstreamURL)
+	conn, err = grpc.Dial(cleanURL, options...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial gRPC server: %w", err)
+	}
+
+	p.connections[upstreamURL] = conn
 	return conn, nil
 }
 
-// proxyStreams proxies data between client and upstream service streams
-func (h *ProxyHandler) proxyStreams(clientStream grpc.ServerStream, upstreamStream grpc.ClientStream) error {
-	// Create error channel
-	errChan := make(chan error, 2)
-
-	// Start forwarding in both directions
-	go func() {
-		err := h.forwardClientToUpstream(clientStream, upstreamStream)
-		errChan <- err
-	}()
-
-	go func() {
-		err := h.forwardUpstreamToClient(upstreamStream, clientStream)
-		errChan <- err
-	}()
-
-	// Wait for one direction to complete or error
-	err := <-errChan
-	if err != nil && err != io.EOF {
-		return err
-	}
-
-	return nil
+func (p *GRPCProxy) GetMetrics() *GRPCMetrics {
+	return p.metrics
 }
 
-// forwardClientToUpstream forwards messages from client to upstream service
-func (h *ProxyHandler) forwardClientToUpstream(src grpc.ServerStream, dst grpc.ClientStream) error {
-	for {
-		// Receive message from client
-		message := make([]byte, 0)
-		err := src.RecvMsg(&message)
-		if err == io.EOF {
-			// Close the client stream
-			dst.CloseSend()
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		// Send message to upstream
-		if err := dst.SendMsg(message); err != nil {
-			return err
-		}
+func getClientAddress(ctx context.Context) string {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return "unknown"
 	}
+	return p.Addr.String()
 }
 
-// forwardUpstreamToClient forwards messages from upstream service to client
-func (h *ProxyHandler) forwardUpstreamToClient(src grpc.ClientStream, dst grpc.ServerStream) error {
-	for {
-		// Receive message from upstream
-		message := make([]byte, 0)
-		err := src.RecvMsg(&message)
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		// Send message to client
-		if err := dst.SendMsg(message); err != nil {
-			return err
-		}
-	}
-}
-
-// parseMethodName parses a gRPC full method name into service and method names
-func parseMethodName(fullMethod string) (service, method string) {
-	if len(fullMethod) == 0 || fullMethod[0] != '/' {
+func splitMethodName(fullMethod string) (serviceName, methodName string) {
+	if !strings.HasPrefix(fullMethod, "/") {
 		return "", ""
 	}
 
@@ -466,21 +349,123 @@ func parseMethodName(fullMethod string) (service, method string) {
 	return parts[0], parts[1]
 }
 
-// getClientAddress gets the client address from the context
-func getClientAddress(ctx context.Context) string {
-	p, ok := peer.FromContext(ctx)
-	if !ok {
-		return "unknown"
+func extractServiceFromMethod(fullMethod string) string {
+	service, _ := splitMethodName(fullMethod)
+	return service
+}
+
+func isGRPCEnabled(grpcConfig map[string]interface{}) bool {
+	enabled, ok := grpcConfig["enabled"].(bool)
+	return ok && enabled
+}
+
+func getUpstreamURL(route map[string]interface{}) (string, error) {
+	grpcConfig, ok := route["grpc"].(map[string]interface{})
+	if ok {
+		if upstreamURL, ok := grpcConfig["upstream_url"].(string); ok && upstreamURL != "" {
+			return upstreamURL, nil
+		}
 	}
-	return p.Addr.String()
+
+	if upstreamURL, ok := route["upstream_url"].(string); ok && upstreamURL != "" {
+		return upstreamURL, nil
+	}
+
+	return "", errors.New("no upstream URL configured")
 }
 
-// GetMetrics returns gRPC metrics
-func (h *ProxyHandler) GetMetrics() *GRPCMetrics {
-	return h.metrics
+func getMaxMessageSize(grpcConfig map[string]interface{}) int {
+	if grpcConfig == nil {
+		return 0
+	}
+
+	if maxSize, ok := grpcConfig["max_message_size"].(int); ok {
+		return maxSize
+	}
+
+	if maxSizeStr, ok := grpcConfig["max_message_size"].(string); ok {
+		if maxSize, err := strconv.Atoi(maxSizeStr); err == nil {
+			return maxSize
+		}
+	}
+
+	return 0
 }
 
-// RegisterInterceptor registers a gRPC interceptor
-func (h *ProxyHandler) RegisterInterceptor(interceptor grpc.UnaryServerInterceptor) {
-	h.interceptors = append(h.interceptors, interceptor)
+func cleanupGRPCURL(url string) string {
+	url = strings.TrimPrefix(url, "grpc://")
+	url = strings.TrimPrefix(url, "grpcs://")
+	url = strings.TrimPrefix(url, "http://")
+	url = strings.TrimPrefix(url, "https://")
+	return url
+}
+
+func checkStreamingType(stream grpc.ServerStream) (isClientStream, isServerStream bool) {
+	streamDesc := stream.StreamDesc()
+	if streamDesc == nil {
+		return false, false
+	}
+	return streamDesc.ClientStreams, streamDesc.ServerStreams
+}
+
+func createClientStream(conn *grpc.ClientConn, ctx context.Context, fullMethod string, isClientStream, isServerStream bool) (grpc.ClientStream, error) {
+	desc := &grpc.StreamDesc{
+		ServerStreams: isServerStream,
+		ClientStreams: isClientStream,
+	}
+	return conn.NewStream(ctx, desc, fullMethod)
+}
+
+func proxyStream(serverStream grpc.ServerStream, clientStream grpc.ClientStream) error {
+	egress := func() error {
+		for {
+			message := make([]byte, 0)
+			err := serverStream.RecvMsg(&message)
+			if err == io.EOF {
+				clientStream.CloseSend()
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+
+			err = clientStream.SendMsg(message)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	ingress := func() error {
+		for {
+			message := make([]byte, 0)
+			err := clientStream.RecvMsg(&message)
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+
+			err = serverStream.SendMsg(message)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	done := make(chan error, 2)
+	go func() {
+		done <- egress()
+	}()
+	go func() {
+		done <- ingress()
+	}()
+
+	err := <-done
+	if err != nil && err != io.EOF {
+		return err
+	}
+
+	return <-done
 }

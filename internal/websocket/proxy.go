@@ -1,449 +1,450 @@
 package websocket
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/fasthttp/websocket"
-	"github.com/gofiber/fiber/v2"
-	fibws "github.com/gofiber/websocket/v2"
-
 	"github.com/bimapangestu28/horizon/internal/interfaces"
-	"github.com/bimapangestu28/horizon/internal/types"
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/websocket/v2"
 )
 
-type ProxyHandler struct {
-	router            interfaces.Router
-	logger            logging.Logger
-	metrics           *WebSocketMetrics
-	config            *WebSocketProxyConfig
-	activeConnections sync.Map
+var (
+	ErrWebSocketNotEnabled     = errors.New("websocket not enabled for this route")
+	ErrWebSocketUpgradeFailure = errors.New("failed to upgrade connection to websocket")
+	ErrUpstreamConnectFailure  = errors.New("failed to connect to upstream websocket")
+	ErrInvalidUpstreamURL      = errors.New("invalid upstream websocket URL")
+)
+
+type WebSocketProxy struct {
+	router           interfaces.Router
+	logger           logging.Logger
+	connections      map[string]*ConnectionInfo
+	connectionsMutex sync.RWMutex
+	metrics          *WebSocketMetrics
+	config           *WebSocketConfig
 }
 
-type WebSocketProxyConfig struct {
-	PingInterval        time.Duration
-	PongWait            time.Duration
-	WriteWait           time.Duration
-	ReadBufferSize      int
-	WriteBufferSize     int
-	MaxMessageSize      int64
-	MessageBufferSize   int
-	EnableCompression   bool
-	ForwardHeaders      []string
-	AllowedOrigins      []string
-	EnableProxyProtocol bool
+type ConnectionInfo struct {
+	ID            string
+	ClientConn    *websocket.Conn
+	UpstreamConn  *websocket.Conn
+	Route         string
+	StartTime     time.Time
+	BytesReceived int64
+	BytesSent     int64
+	MessagesIn    int64
+	MessagesOut   int64
+	LastActivity  time.Time
 }
 
-type ConnectionPair struct {
-	ClientConn   *fibws.Conn
-	UpstreamConn *websocket.Conn
-	Started      time.Time
-	BytesIn      int64
-	BytesOut     int64
-	MessageCount int64
+type WebSocketMetrics struct {
+	ActiveConnections   int64
+	TotalConnections    int64
+	BytesReceived       int64
+	BytesSent           int64
+	MessagesReceived    int64
+	MessagesSent        int64
+	Errors              int64
+	ConnectionDurations []time.Duration
+	mutex               sync.Mutex
 }
 
-func NewWebSocketProxyHandler(router interfaces.Router, logger logging.Logger) *ProxyHandler {
-	return &ProxyHandler{
-		router: router,
-		logger: logger,
-		metrics: &WebSocketMetrics{
-			ConnectionsActive: 0,
-			ConnectionsTotal:  0,
-			MessagesReceived:  0,
-			MessagesSent:      0,
-			BytesReceived:     0,
-			BytesSent:         0,
-			ConnectionErrors:  0,
-			MessageErrors:     0,
-		},
-		config: &WebSocketProxyConfig{
-			PingInterval:        30 * time.Second,
-			PongWait:            60 * time.Second,
-			WriteWait:           10 * time.Second,
-			ReadBufferSize:      4096,
-			WriteBufferSize:     4096,
-			MaxMessageSize:      512 * 1024, // 512 KB
-			MessageBufferSize:   256,
-			EnableCompression:   true,
-			ForwardHeaders:      []string{"Authorization", "X-API-Key"},
-			AllowedOrigins:      []string{"*"},
-			EnableProxyProtocol: false,
-		},
-		activeConnections: sync.Map{},
+type WebSocketConfig struct {
+	PingInterval      time.Duration
+	PongWait          time.Duration
+	WriteWait         time.Duration
+	ReadBufferSize    int
+	WriteBufferSize   int
+	MaxMessageSize    int64
+	EnableCompression bool
+	AllowedOrigins    []string
+	HeadersToForward  []string
+}
+
+func NewWebSocketProxy(router interfaces.Router, logger logging.Logger) *WebSocketProxy {
+	metrics := &WebSocketMetrics{
+		ConnectionDurations: make([]time.Duration, 0, 100),
+	}
+
+	config := &WebSocketConfig{
+		PingInterval:      30 * time.Second,
+		PongWait:          60 * time.Second,
+		WriteWait:         10 * time.Second,
+		ReadBufferSize:    4096,
+		WriteBufferSize:   4096,
+		MaxMessageSize:    512 * 1024,
+		EnableCompression: true,
+		AllowedOrigins:    []string{"*"},
+		HeadersToForward:  []string{"Authorization", "Cookie", "User-Agent"},
+	}
+
+	return &WebSocketProxy{
+		router:      router,
+		logger:      logger,
+		connections: make(map[string]*ConnectionInfo),
+		metrics:     metrics,
+		config:      config,
 	}
 }
 
-func (h *ProxyHandler) HandleRequest(c *fiber.Ctx) error {
-	// Check if it's a WebSocket upgrade request
-	if !websocket.FastHTTPIsWebSocketUpgrade(c.Context()) {
+func (p *WebSocketProxy) HandleRequest(c *fiber.Ctx) error {
+	if !websocket.IsWebSocketUpgrade(c) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "WebSocket upgrade required",
 		})
 	}
 
-	// Find route
-	httpReq := &http.Request{
-		Method: c.Method(),
-		URL:    c.Request().URI().QueryArgs().QueryString(),
-		Header: make(http.Header),
-		Host:   string(c.Request().Host()),
+	route, err := p.findRoute(c)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
 	}
 
-	// Copy headers
+	isEnabled, wsConfig := p.isWebSocketEnabled(route)
+	if !isEnabled {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": ErrWebSocketNotEnabled.Error(),
+		})
+	}
+
+	return websocket.New(func(clientConn *websocket.Conn) {
+		p.handleConnection(clientConn, route, wsConfig)
+	}, websocket.Config{
+		ReadBufferSize:    p.config.ReadBufferSize,
+		WriteBufferSize:   p.config.WriteBufferSize,
+		EnableCompression: p.config.EnableCompression,
+	})(c)
+}
+
+func (p *WebSocketProxy) findRoute(c *fiber.Ctx) (map[string]interface{}, error) {
+	httpReq := &http.Request{
+		Method:     c.Method(),
+		URL:        createURL(c.Path(), c.Query()),
+		Header:     make(http.Header),
+		Host:       c.Hostname(),
+		RemoteAddr: c.IP(),
+	}
+
 	c.Request().Header.VisitAll(func(key, value []byte) {
 		httpReq.Header.Add(string(key), string(value))
 	})
 
-	route, err := h.router.FindRoute(httpReq)
+	routeInfo, err := p.router.FindRoute(httpReq)
 	if err != nil {
-		h.logger.Error("WebSocket route not found", "path", c.Path(), "error", err)
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Route not found for WebSocket connection",
-		})
+		return nil, errors.New("route not found")
 	}
 
-	// Check if WebSocket is enabled for this route
-	if !h.isWebSocketEnabled(route) {
-		h.logger.Error("WebSocket not enabled for route", "path", c.Path(), "route", route.Name)
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "WebSocket not enabled for this route",
-		})
-	}
-
-	// Handle WebSocket connection
-	return fibws.New(func(clientConn *fibws.Conn) {
-		h.handleWebSocketConnection(clientConn, route)
-	}, fibws.Config{
-		ReadBufferSize:    h.config.ReadBufferSize,
-		WriteBufferSize:   h.config.WriteBufferSize,
-		EnableCompression: h.config.EnableCompression,
-		HandshakeTimeout:  h.config.PongWait,
-	})(c)
+	return routeInfo, nil
 }
 
-func (h *ProxyHandler) handleWebSocketConnection(clientConn *fibws.Conn, route *types.Route) {
-	h.metrics.ConnectionsActive++
-	h.metrics.ConnectionsTotal++
+func (p *WebSocketProxy) isWebSocketEnabled(route map[string]interface{}) (bool, map[string]interface{}) {
+	wsConfig, ok := route["websocket"].(map[string]interface{})
+	if !ok {
+		return false, nil
+	}
 
-	connStartTime := time.Now()
-	connectionID := fmt.Sprintf("%s-%d", clientConn.RemoteAddr().String(), connStartTime.UnixNano())
+	enabled, ok := wsConfig["enabled"].(bool)
+	if !ok || !enabled {
+		return false, nil
+	}
 
-	h.logger.Info("WebSocket connection established",
+	return true, wsConfig
+}
+
+func (p *WebSocketProxy) handleConnection(clientConn *websocket.Conn, route map[string]interface{}, wsConfig map[string]interface{}) {
+	connectionID := generateConnectionID()
+	startTime := time.Now()
+
+	p.incrementActiveConnections()
+	defer p.decrementActiveConnections()
+
+	routeName, _ := route["name"].(string)
+	p.logger.Info("WebSocket connection established",
 		"id", connectionID,
-		"route", route.Name,
+		"route", routeName,
 		"client", clientConn.RemoteAddr().String())
 
-	defer func() {
-		h.metrics.ConnectionsActive--
-		duration := time.Since(connStartTime)
-
-		h.logger.Info("WebSocket connection closed",
-			"id", connectionID,
-			"route", route.Name,
-			"client", clientConn.RemoteAddr().String(),
-			"duration", duration.String())
-
-		h.activeConnections.Delete(connectionID)
-	}()
-
-	// Get upstream URL
-	upstreamURL := route.WebSocket.UpstreamURL
+	upstreamURL := getUpstreamURL(route, wsConfig)
 	if upstreamURL == "" {
-		upstreamURL = route.UpstreamURL
+		p.logger.Error("Invalid upstream URL configuration", "id", connectionID)
+		p.closeConnection(clientConn, websocket.CloseInternalServerErr, "Invalid upstream configuration")
+		return
 	}
 
-	// Make sure it's a WebSocket URL
-	if !strings.HasPrefix(upstreamURL, "ws://") && !strings.HasPrefix(upstreamURL, "wss://") {
-		if strings.HasPrefix(upstreamURL, "http://") {
-			upstreamURL = "ws://" + upstreamURL[7:]
-		} else if strings.HasPrefix(upstreamURL, "https://") {
-			upstreamURL = "wss://" + upstreamURL[8:]
-		} else {
-			upstreamURL = "ws://" + upstreamURL
-		}
-	}
-
-	// Prepare headers for upstream connection
-	headers := http.Header{}
-	for _, headerName := range h.config.ForwardHeaders {
-		if value := clientConn.Headers(headerName); len(value) > 0 {
-			headers.Set(headerName, value)
-		}
-	}
-
-	// Connect to upstream WebSocket
-	dialer := &websocket.Dialer{
-		ReadBufferSize:    h.config.ReadBufferSize,
-		WriteBufferSize:   h.config.WriteBufferSize,
-		HandshakeTimeout:  h.config.PongWait,
-		EnableCompression: h.config.EnableCompression,
-	}
-
-	upstreamConn, resp, err := dialer.Dial(upstreamURL, headers)
+	headers := extractHeadersToForward(clientConn, p.config.HeadersToForward)
+	upstreamConn, _, err := websocket.DefaultDialer.Dial(upstreamURL, headers)
 	if err != nil {
-		h.metrics.ConnectionErrors++
-		errMsg := err.Error()
-		if resp != nil {
-			errMsg = fmt.Sprintf("Upstream server returned HTTP %d: %s", resp.StatusCode, err.Error())
-		}
-
-		h.logger.Error("Failed to connect to upstream WebSocket",
+		p.logger.Error("Failed to connect to upstream",
 			"id", connectionID,
-			"route", route.Name,
 			"upstream", upstreamURL,
-			"error", errMsg)
-
-		// Send close message to client
-		clientConn.WriteControl(
-			websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "Failed to connect to upstream service"),
-			time.Now().Add(time.Second),
-		)
+			"error", err)
+		p.closeConnection(clientConn, websocket.CloseInternalServerErr, "Failed to connect to service")
 		return
 	}
 	defer upstreamConn.Close()
 
-	// Store connection pair
-	connPair := &ConnectionPair{
+	connInfo := &ConnectionInfo{
+		ID:           connectionID,
 		ClientConn:   clientConn,
 		UpstreamConn: upstreamConn,
-		Started:      connStartTime,
-		BytesIn:      0,
-		BytesOut:     0,
-		MessageCount: 0,
+		Route:        routeName,
+		StartTime:    startTime,
+		LastActivity: startTime,
 	}
-	h.activeConnections.Store(connectionID, connPair)
 
-	// Create channels for message passing and error handling
-	doneCh := make(chan struct{})
-	errorCh := make(chan error, 2)
+	p.registerConnection(connInfo)
+	defer p.unregisterConnection(connectionID)
 
-	// Start goroutines for bi-directional message forwarding
-	go h.readFromClientAndWriteToUpstream(clientConn, upstreamConn, connPair, errorCh, doneCh)
-	go h.readFromUpstreamAndWriteToClient(upstreamConn, clientConn, connPair, errorCh, doneCh)
+	done := make(chan struct{})
+	defer close(done)
 
-	// Set up ping/pong handling
-	pingTicker := time.NewTicker(h.config.PingInterval)
-	defer pingTicker.Stop()
+	go p.handleClientMessages(connInfo, done)
+	go p.handleUpstreamMessages(connInfo, done)
+	go p.pingClient(connInfo, done)
 
-	// Wait for completion or error
-	select {
-	case <-doneCh:
-		// Normal completion
-		return
-	case err := <-errorCh:
-		h.logger.Error("WebSocket error occurred",
-			"id", connectionID,
-			"route", route.Name,
-			"error", err.Error())
-		return
-	case <-pingTicker.C:
-		// Send ping to client
-		if err := clientConn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(h.config.WriteWait)); err != nil {
-			h.logger.Error("Failed to write ping message to client",
-				"id", connectionID,
-				"error", err.Error())
-			return
-		}
-	}
+	<-done
+	duration := time.Since(startTime)
+	p.recordConnectionDuration(duration)
+
+	p.logger.Info("WebSocket connection closed",
+		"id", connectionID,
+		"route", routeName,
+		"duration", duration.String(),
+		"bytes_in", connInfo.BytesReceived,
+		"bytes_out", connInfo.BytesSent,
+		"messages_in", connInfo.MessagesIn,
+		"messages_out", connInfo.MessagesOut)
 }
 
-func (h *ProxyHandler) readFromClientAndWriteToUpstream(
-	clientConn *fibws.Conn,
-	upstreamConn *websocket.Conn,
-	connPair *ConnectionPair,
-	errorCh chan<- error,
-	doneCh chan<- struct{},
-) {
-	defer func() {
-		close(doneCh)
-	}()
-
-	// Set read deadline and message size limit
-	clientConn.SetReadLimit(h.config.MaxMessageSize)
-	clientConn.SetReadDeadline(time.Now().Add(h.config.PongWait))
-
-	// Set up pong handler to reset read deadline
-	clientConn.SetPongHandler(func(string) error {
-		clientConn.SetReadDeadline(time.Now().Add(h.config.PongWait))
+func (p *WebSocketProxy) handleClientMessages(conn *ConnectionInfo, done chan struct{}) {
+	conn.ClientConn.SetReadLimit(p.config.MaxMessageSize)
+	conn.ClientConn.SetReadDeadline(time.Now().Add(p.config.PongWait))
+	conn.ClientConn.SetPongHandler(func(string) error {
+		conn.ClientConn.SetReadDeadline(time.Now().Add(p.config.PongWait))
 		return nil
 	})
 
 	for {
-		msgType, msg, err := clientConn.ReadMessage()
+		messageType, message, err := conn.ClientConn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err,
 				websocket.CloseGoingAway,
-				websocket.CloseNormalClosure,
-				websocket.CloseNoStatusReceived) {
-				errorCh <- fmt.Errorf("unexpected close error from client: %w", err)
+				websocket.CloseAbnormalClosure) {
+				p.logger.Error("Client read error",
+					"id", conn.ID,
+					"error", err)
+				p.metrics.Errors++
 			}
-			break
+			return
 		}
 
-		// Update metrics
-		h.metrics.MessagesReceived++
-		msgSize := int64(len(msg))
-		h.metrics.BytesReceived += msgSize
-		connPair.BytesIn += msgSize
-		connPair.MessageCount++
+		conn.LastActivity = time.Now()
+		conn.BytesReceived += int64(len(message))
+		conn.MessagesIn++
+		p.metrics.MessagesReceived++
+		p.metrics.BytesReceived += int64(len(message))
 
-		// Write to upstream
-		err = upstreamConn.WriteMessage(msgType, msg)
+		err = conn.UpstreamConn.WriteMessage(messageType, message)
 		if err != nil {
-			h.metrics.MessageErrors++
-			errorCh <- fmt.Errorf("error writing message to upstream: %w", err)
-			break
+			p.logger.Error("Upstream write error",
+				"id", conn.ID,
+				"error", err)
+			p.metrics.Errors++
+			return
 		}
 
-		// Update metrics
-		h.metrics.MessagesSent++
-		h.metrics.BytesSent += msgSize
-		connPair.BytesOut += msgSize
+		conn.MessagesSent++
+		conn.BytesSent += int64(len(message))
+		p.metrics.MessagesSent++
+		p.metrics.BytesSent += int64(len(message))
 	}
 }
 
-func (h *ProxyHandler) readFromUpstreamAndWriteToClient(
-	upstreamConn *websocket.Conn,
-	clientConn *fibws.Conn,
-	connPair *ConnectionPair,
-	errorCh chan<- error,
-	doneCh chan<- struct{},
-) {
-	// Set read deadline and message size limit
-	upstreamConn.SetReadLimit(h.config.MaxMessageSize)
-	upstreamConn.SetReadDeadline(time.Now().Add(h.config.PongWait))
+func (p *WebSocketProxy) handleUpstreamMessages(conn *ConnectionInfo, done chan struct{}) {
+	for {
+		messageType, message, err := conn.UpstreamConn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err,
+				websocket.CloseGoingAway,
+				websocket.CloseAbnormalClosure) {
+				p.logger.Error("Upstream read error",
+					"id", conn.ID,
+					"error", err)
+				p.metrics.Errors++
+			}
+			done <- struct{}{}
+			return
+		}
 
-	// Set up pong handler to reset read deadline
-	upstreamConn.SetPongHandler(func(string) error {
-		upstreamConn.SetReadDeadline(time.Now().Add(h.config.PongWait))
-		return nil
-	})
+		conn.LastActivity = time.Now()
+		conn.BytesReceived += int64(len(message))
+		conn.MessagesIn++
+		p.metrics.MessagesReceived++
+		p.metrics.BytesReceived += int64(len(message))
+
+		err = conn.ClientConn.WriteMessage(messageType, message)
+		if err != nil {
+			p.logger.Error("Client write error",
+				"id", conn.ID,
+				"error", err)
+			p.metrics.Errors++
+			done <- struct{}{}
+			return
+		}
+
+		conn.MessagesOut++
+		conn.BytesSent += int64(len(message))
+		p.metrics.MessagesSent++
+		p.metrics.BytesSent += int64(len(message))
+	}
+}
+
+func (p *WebSocketProxy) pingClient(conn *ConnectionInfo, done chan struct{}) {
+	ticker := time.NewTicker(p.config.PingInterval)
+	defer ticker.Stop()
 
 	for {
-		msgType, msg, err := upstreamConn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err,
-				websocket.CloseGoingAway,
-				websocket.CloseNormalClosure,
-				websocket.CloseNoStatusReceived) {
-				errorCh <- fmt.Errorf("unexpected close error from upstream: %w", err)
+		select {
+		case <-ticker.C:
+			conn.ClientConn.SetWriteDeadline(time.Now().Add(p.config.WriteWait))
+			if err := conn.ClientConn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				p.logger.Error("Ping failed", "id", conn.ID, "error", err)
+				done <- struct{}{}
+				return
 			}
+		case <-done:
 			return
 		}
-
-		// Update metrics
-		h.metrics.MessagesReceived++
-		msgSize := int64(len(msg))
-		h.metrics.BytesReceived += msgSize
-		connPair.BytesIn += msgSize
-		connPair.MessageCount++
-
-		// Write to client
-		clientConn.SetWriteDeadline(time.Now().Add(h.config.WriteWait))
-		err = clientConn.WriteMessage(msgType, msg)
-		if err != nil {
-			h.metrics.MessageErrors++
-			errorCh <- fmt.Errorf("error writing message to client: %w", err)
-			return
-		}
-
-		// Update metrics
-		h.metrics.MessagesSent++
-		h.metrics.BytesSent += msgSize
-		connPair.BytesOut += msgSize
 	}
 }
 
-func (h *ProxyHandler) isWebSocketEnabled(route *types.Route) bool {
-	return route.WebSocket != nil && route.WebSocket.Enabled
+func (p *WebSocketProxy) closeConnection(conn *websocket.Conn, code int, message string) {
+	closeMessage := websocket.FormatCloseMessage(code, message)
+	conn.WriteControl(websocket.CloseMessage, closeMessage, time.Now().Add(time.Second))
+	conn.Close()
 }
 
-func (h *ProxyHandler) GetStats() WebSocketStats {
-	var stats WebSocketStats
+func (p *WebSocketProxy) incrementActiveConnections() {
+	p.metrics.mutex.Lock()
+	p.metrics.ActiveConnections++
+	p.metrics.TotalConnections++
+	p.metrics.mutex.Unlock()
+}
 
-	stats.ConnectionsActive = h.metrics.ConnectionsActive
-	stats.ConnectionsTotal = h.metrics.ConnectionsTotal
-	stats.MessagesReceived = h.metrics.MessagesReceived
-	stats.MessagesSent = h.metrics.MessagesSent
-	stats.BytesReceived = h.metrics.BytesReceived
-	stats.BytesSent = h.metrics.BytesSent
-	stats.ConnectionErrors = h.metrics.ConnectionErrors
-	stats.MessageErrors = h.metrics.MessageErrors
+func (p *WebSocketProxy) decrementActiveConnections() {
+	p.metrics.mutex.Lock()
+	p.metrics.ActiveConnections--
+	p.metrics.mutex.Unlock()
+}
 
-	// Calculate average connection time
-	var totalDuration float64
-	var maxDuration float64
-	var totalMsgSize int64
-	var count int
+func (p *WebSocketProxy) recordConnectionDuration(duration time.Duration) {
+	p.metrics.mutex.Lock()
+	p.metrics.ConnectionDurations = append(p.metrics.ConnectionDurations, duration)
+	if len(p.metrics.ConnectionDurations) > 1000 {
+		p.metrics.ConnectionDurations = p.metrics.ConnectionDurations[len(p.metrics.ConnectionDurations)-1000:]
+	}
+	p.metrics.mutex.Unlock()
+}
 
-	h.activeConnections.Range(func(_, value interface{}) bool {
-		connPair, ok := value.(*ConnectionPair)
-		if !ok {
-			return true
-		}
+func (p *WebSocketProxy) registerConnection(conn *ConnectionInfo) {
+	p.connectionsMutex.Lock()
+	defer p.connectionsMutex.Unlock()
+	p.connections[conn.ID] = conn
+}
 
-		duration := time.Since(connPair.Started).Seconds()
-		totalDuration += duration
+func (p *WebSocketProxy) unregisterConnection(id string) {
+	p.connectionsMutex.Lock()
+	defer p.connectionsMutex.Unlock()
+	delete(p.connections, id)
+}
 
-		if duration > maxDuration {
-			maxDuration = duration
-		}
+func (p *WebSocketProxy) GetActiveConnections() int {
+	p.connectionsMutex.RLock()
+	defer p.connectionsMutex.RUnlock()
+	return len(p.connections)
+}
 
-		totalMsgSize += connPair.BytesIn + connPair.BytesOut
-		count++
+func (p *WebSocketProxy) SetConfig(config *WebSocketConfig) {
+	p.config = config
+}
 
-		return true
-	})
+func (p *WebSocketProxy) GetMetrics() *WebSocketMetrics {
+	return p.metrics
+}
 
-	if count > 0 {
-		stats.AvgConnectionTime = totalDuration / float64(count)
-		stats.MaxConnectionTime = maxDuration
+func (p *WebSocketProxy) CloseAllConnections() {
+	p.connectionsMutex.Lock()
+	connections := make([]*ConnectionInfo, 0, len(p.connections))
+	for _, conn := range p.connections {
+		connections = append(connections, conn)
+	}
+	p.connectionsMutex.Unlock()
 
-		if h.metrics.MessagesReceived+h.metrics.MessagesSent > 0 {
-			stats.AvgMessageSize = float64(totalMsgSize) / float64(h.metrics.MessagesReceived+h.metrics.MessagesSent)
+	for _, conn := range connections {
+		p.closeConnection(conn.ClientConn, websocket.CloseNormalClosure, "Server shutdown")
+	}
+}
+
+func createURL(path string, queryString string) *url.URL {
+	u := &url.URL{
+		Path: path,
+	}
+	if queryString != "" {
+		u.RawQuery = queryString
+	}
+	return u
+}
+
+func getUpstreamURL(route map[string]interface{}, wsConfig map[string]interface{}) string {
+	wsUpstream, ok := wsConfig["upstream_url"].(string)
+	if ok && wsUpstream != "" {
+		return ensureWebSocketProtocol(wsUpstream)
+	}
+
+	upstreamURL, ok := route["upstream_url"].(string)
+	if !ok || upstreamURL == "" {
+		return ""
+	}
+
+	return ensureWebSocketProtocol(upstreamURL)
+}
+
+func ensureWebSocketProtocol(url string) string {
+	if strings.HasPrefix(url, "ws://") || strings.HasPrefix(url, "wss://") {
+		return url
+	}
+
+	if strings.HasPrefix(url, "http://") {
+		return "ws://" + url[7:]
+	}
+
+	if strings.HasPrefix(url, "https://") {
+		return "wss://" + url[8:]
+	}
+
+	return "ws://" + url
+}
+
+func extractHeadersToForward(conn *websocket.Conn, headersToForward []string) http.Header {
+	headers := http.Header{}
+
+	for _, headerName := range headersToForward {
+		if value := conn.Headers(headerName); value != "" {
+			headers.Set(headerName, value)
 		}
 	}
 
-	if count > 0 {
-		stats.LastConnectionTime = time.Now().Format(time.RFC3339)
-	}
-
-	return stats
+	return headers
 }
 
-func (h *ProxyHandler) GetActiveConnections() int {
-	var count int
-	h.activeConnections.Range(func(_, _ interface{}) bool {
-		count++
-		return true
-	})
-	return count
-}
-
-func (h *ProxyHandler) CloseAllConnections() {
-	h.activeConnections.Range(func(key, value interface{}) bool {
-		connPair, ok := value.(*ConnectionPair)
-		if !ok {
-			return true
-		}
-
-		// Close connections
-		connPair.ClientConn.Close()
-		connPair.UpstreamConn.Close()
-
-		// Remove from map
-		h.activeConnections.Delete(key)
-
-		return true
-	})
-}
-
-func (h *ProxyHandler) SetConfig(config *WebSocketProxyConfig) {
-	h.config = config
+func generateConnectionID() string {
+	return fmt.Sprintf("%x", time.Now().UnixNano())
 }
