@@ -9,20 +9,27 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/bimapangestu28/horizon/internal/interfaces"
 	"github.com/bimapangestu28/horizon/internal/metrics"
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
+// MetricsHandler implements metrics handling functionality
 type MetricsHandler struct {
 	logger logging.Logger
 }
 
+// Ensure MetricsHandler implements interfaces.MetricsHandlerInterface
+var _ interfaces.MetricsHandlerInterface = (*MetricsHandler)(nil)
+
+// NewMetricsHandler creates a new metrics handler
 func NewMetricsHandler(logger logging.Logger) *MetricsHandler {
 	return &MetricsHandler{
 		logger: logger,
 	}
 }
 
+// GetMetrics returns Prometheus metrics
 func (h *MetricsHandler) GetMetrics(c *fiber.Ctx) error {
 	promHandler := promhttp.Handler()
 
@@ -46,11 +53,17 @@ func (h *MetricsHandler) GetMetrics(c *fiber.Ctx) error {
 	return nil
 }
 
+// RecordRequest records request metrics
 func (h *MetricsHandler) RecordRequest(c *fiber.Ctx, routeName string) error {
 	path := c.Path()
 	method := c.Method()
 
-	duration := time.Since(time.Time(c.Locals("start").(time.Time))).Seconds()
+	start, ok := c.Locals("start").(time.Time)
+	if !ok {
+		start = time.Now()
+	}
+
+	duration := time.Since(start).Seconds()
 	status := c.Response().StatusCode()
 	reqSize := len(c.Request().Body())
 	respSize := len(c.Response().Body())
@@ -60,38 +73,47 @@ func (h *MetricsHandler) RecordRequest(c *fiber.Ctx, routeName string) error {
 	return nil
 }
 
+// RecordCacheActivity records cache hit/miss metrics
 func (h *MetricsHandler) RecordCacheActivity(routeName, cacheType string, hit bool) {
 	metrics.RecordCacheActivity(routeName, cacheType, hit)
 }
 
+// RecordRateLimit records rate limiting metrics
 func (h *MetricsHandler) RecordRateLimit(routeName, limitType, scope string) {
 	metrics.RecordRateLimit(routeName, limitType, scope)
 }
 
+// RecordAuthentication records authentication metrics
 func (h *MetricsHandler) RecordAuthentication(routeName, authType string, success bool, reason string) {
 	metrics.RecordAuthentication(routeName, authType, success, reason)
 }
 
+// RecordCircuitBreakerTrip records circuit breaker trip metrics
 func (h *MetricsHandler) RecordCircuitBreakerTrip(routeName, breakerType string) {
 	metrics.RecordCircuitBreakerTrip(routeName, breakerType)
 }
 
+// SetCircuitBreakerState sets circuit breaker state metrics
 func (h *MetricsHandler) SetCircuitBreakerState(routeName, breakerType string, state int) {
 	metrics.SetCircuitBreakerState(routeName, breakerType, state)
 }
 
+// SetUpstreamHealth sets upstream health metrics
 func (h *MetricsHandler) SetUpstreamHealth(upstream, routeName string, healthy bool) {
 	metrics.SetUpstreamHealth(upstream, routeName, healthy)
 }
 
+// SetUpstreamConnections sets upstream connection metrics
 func (h *MetricsHandler) SetUpstreamConnections(upstream, routeName string, connections int) {
 	metrics.SetUpstreamConnections(upstream, routeName, connections)
 }
 
+// RecordConfigReload records config reload metrics
 func (h *MetricsHandler) RecordConfigReload() {
 	metrics.RecordConfigReload()
 }
 
+// RecordUpstreamRequest records upstream request metrics
 func (h *MetricsHandler) RecordUpstreamRequest(upstream, method, routeName string, duration float64) {
 	metrics.RecordUpstreamRequest(upstream, method, routeName, duration)
 }

@@ -18,12 +18,6 @@ const (
 // Migration represents a function that migrates from one config version to another
 type Migration func(*Config) (*Config, error)
 
-// VersionedConfig includes version information with the config
-type VersionedConfig struct {
-	Version ConfigVersion `yaml:"version"`
-	Config  *Config       `yaml:"config"`
-}
-
 // migrationMap maps from version to a migration function
 var migrationMap = map[ConfigVersion]Migration{
 	InitialVersion: migrateInitialToCurrent,
@@ -92,4 +86,9 @@ func migrateInitialToCurrent(config *Config) (*Config, error) {
 	}
 
 	return newConfig, nil
+}
+
+// ConvertConfigVersionToString converts a ConfigVersion to a string
+func ConvertConfigVersionToString(version ConfigVersion) string {
+	return string(version)
 }

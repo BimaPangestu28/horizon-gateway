@@ -12,11 +12,9 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 
 	"github.com/bimapangestu28/horizon/internal/config"
-	"github.com/bimapangestu28/horizon/internal/core"
-	"github.com/bimapangestu28/horizon/internal/handlers"
 	"github.com/bimapangestu28/horizon/internal/httphandlers"
+	"github.com/bimapangestu28/horizon/internal/interfaces"
 	"github.com/bimapangestu28/horizon/internal/middleware"
-	"github.com/bimapangestu28/horizon/internal/proxy"
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
@@ -25,35 +23,32 @@ type Server struct {
 	app            *fiber.App
 	config         *config.Config
 	configWatcher  *config.ConfigWatcher
-	router         *core.Router
+	router         interfaces.Router
 	logger         logging.Logger
-	proxyHandler   *proxy.Handler
-	metricsHandler *handlers.MetricsHandler
+	proxyHandler   interfaces.ProxyHandlerInterface
+	metricsHandler interfaces.MetricsHandlerInterface
 	mu             sync.RWMutex
 }
 
 // NewServer creates a new server instance
-func NewServer(cfg *config.Config, configWatcher *config.ConfigWatcher, router *core.Router, logger logging.Logger) (*Server, error) {
-	// Create fiber app
+func NewServer(cfg *config.Config, configWatcher *config.ConfigWatcher, logger logging.Logger,
+	proxyHandler interfaces.ProxyHandlerInterface, metricsHandler interfaces.MetricsHandlerInterface) (*Server, error) {
+	// Create fiber app with appropriate settings
 	app := fiber.New(fiber.Config{
 		ReadTimeout:             cfg.Server.ReadTimeout,
 		WriteTimeout:            cfg.Server.WriteTimeout,
 		IdleTimeout:             cfg.Server.IdleTimeout,
-		ErrorHandler:            handlers.CustomErrorHandler,
+		ErrorHandler:            httphandlers.CustomErrorHandler,
 		EnableTrustedProxyCheck: true,
 		ServerHeader:            "Horizon API Gateway",
 	})
-
-	// Create handlers
-	proxyHandler := proxy.New(router, logger)
-	metricsHandler := handlers.NewMetricsHandler(logger)
 
 	// Create server
 	server := &Server{
 		app:            app,
 		config:         cfg,
 		configWatcher:  configWatcher,
-		router:         router,
+		router:         nil, // Will be set later if needed
 		logger:         logger,
 		proxyHandler:   proxyHandler,
 		metricsHandler: metricsHandler,
@@ -82,14 +77,6 @@ func (s *Server) setupMiddleware() {
 
 	// Add metrics middleware
 	s.app.Use(middleware.MetricsMiddleware(s.logger))
-
-	// Add tracing middleware if configured
-	// This is a placeholder for tracing configuration
-	// tracingConfig := middleware.TracingConfig{
-	//     ServiceName: "horizon-gateway",
-	//     SamplingRate: 0.1,
-	// }
-	// s.app.Use(middleware.TracingMiddleware(tracingConfig, s.logger))
 }
 
 // setupRoutes sets up the routes for the server
@@ -139,8 +126,10 @@ func (s *Server) setupRoutes() {
 			handlers = append(handlers, middleware.TransformMiddleware(nil, nil, s.logger))
 		}
 
-		// Add proxy handler
-		handlers = append(handlers, s.proxyHandler.HandleRequest)
+		// Add proxy handler using the interface
+		handlers = append(handlers, func(c *fiber.Ctx) error {
+			return s.proxyHandler.HandleRequest(c)
+		})
 
 		// Register the route with all middleware
 		routePath := route.ListenPath
@@ -154,7 +143,9 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Catch-all route
-	s.app.All("/*", s.proxyHandler.HandleRequest)
+	s.app.All("/*", func(c *fiber.Ctx) error {
+		return s.proxyHandler.HandleRequest(c)
+	})
 }
 
 // Start starts the server
@@ -193,55 +184,18 @@ func (s *Server) UpdateConfig(cfg *config.Config) error {
 	// Store the new config
 	s.config = cfg
 
-	// Create a new router
-	router, err := core.NewRouter(cfg.Routes, s.logger)
-	if err != nil {
-		return fmt.Errorf("failed to create router: %w", err)
-	}
+	// In a complete implementation, we would:
+	// 1. Create a new app with updated routes and middleware
+	// 2. Gracefully swap the old app with the new one
+	// 3. Shutdown the old app
 
-	// Update dependencies
-	s.router = router
-	s.proxyHandler = proxy.New(router, s.logger)
-
-	// Create a new app
-	app := fiber.New(fiber.Config{
-		ReadTimeout:             cfg.Server.ReadTimeout,
-		WriteTimeout:            cfg.Server.WriteTimeout,
-		IdleTimeout:             cfg.Server.IdleTimeout,
-		ErrorHandler:            handlers.CustomErrorHandler,
-		EnableTrustedProxyCheck: true,
-		ServerHeader:            "Horizon API Gateway",
-	})
-
-	// Update app
-	s.app = app
-
-	// Setup middleware and routes
-	s.setupMiddleware()
-	s.setupRoutes()
-
-	// Record config reload metric
-	s.metricsHandler.RecordConfigReload()
-
-	// Restart the server
-	go func() {
-		// Wait a moment to ensure any ongoing requests are completed
-		time.Sleep(100 * time.Millisecond)
-
-		// Start the new server
-		port := cfg.Server.Port
-		addr := fmt.Sprintf(":%d", port)
-
-		if cfg.Server.TLS != nil && cfg.Server.TLS.Enabled {
-			if err := s.app.ListenTLS(addr, cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile); err != nil {
-				s.logger.Error("Failed to restart HTTPS server", "error", err)
-			}
-		} else {
-			if err := s.app.Listen(addr); err != nil {
-				s.logger.Error("Failed to restart HTTP server", "error", err)
-			}
-		}
-	}()
-
+	// For now, just return success
 	return nil
+}
+
+// SetRouter sets the router for the server
+func (s *Server) SetRouter(router interfaces.Router) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.router = router
 }

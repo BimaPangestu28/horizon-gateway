@@ -11,6 +11,13 @@ import (
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
+type RedisConfig struct {
+	Address   string `json:"address"`
+	Password  string `json:"password,omitempty"`
+	DB        int    `json:"db"`
+	KeyPrefix string `json:"key_prefix,omitempty"`
+}
+
 type AdminCacheHandler struct {
 	configWatcher *config.ConfigWatcher
 	logger        logging.Logger
@@ -134,13 +141,6 @@ func (h *AdminCacheHandler) CreateCacheConfig(c *fiber.Ctx) error {
 		Redis               *RedisConfig `json:"redis,omitempty"`
 	}
 
-	type RedisConfig struct {
-		Address   string `json:"address"`
-		Password  string `json:"password,omitempty"`
-		DB        int    `json:"db"`
-		KeyPrefix string `json:"key_prefix,omitempty"`
-	}
-
 	if err := c.BodyParser(&request); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid request body",
@@ -158,15 +158,15 @@ func (h *AdminCacheHandler) CreateCacheConfig(c *fiber.Ctx) error {
 	}
 
 	if request.TTL == "" {
-		request.TTL = "1m" // Default 1 minute
+		request.TTL = "1m"
 	}
 
 	if len(request.Methods) == 0 {
-		request.Methods = []string{"GET"} // Default GET only
+		request.Methods = []string{"GET"}
 	}
 
 	if request.CacheKeyTemplate == "" {
-		request.CacheKeyTemplate = "{method}:{path}:{query}" // Default template
+		request.CacheKeyTemplate = "{method}:{path}:{query}"
 	}
 
 	cfg := h.configWatcher.GetConfig()
@@ -256,13 +256,6 @@ func (h *AdminCacheHandler) UpdateCacheConfig(c *fiber.Ctx) error {
 		RespectCacheControl *bool        `json:"respect_cache_control,omitempty"`
 		IncludeHost         *bool        `json:"include_host,omitempty"`
 		Redis               *RedisConfig `json:"redis,omitempty"`
-	}
-
-	type RedisConfig struct {
-		Address   string `json:"address,omitempty"`
-		Password  string `json:"password,omitempty"`
-		DB        int    `json:"db,omitempty"`
-		KeyPrefix string `json:"key_prefix,omitempty"`
 	}
 
 	if err := c.BodyParser(&request); err != nil {

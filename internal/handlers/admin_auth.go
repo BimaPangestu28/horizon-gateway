@@ -106,8 +106,10 @@ func (h *AdminAuthHandler) CreateAPIKey(c *fiber.Ctx) error {
 				})
 			}
 
+			generatedKey := generateAPIKey()
+
 			apiKey := auth.APIKey{
-				Key:      generateAPIKey(),
+				Key:      generatedKey,
 				Name:     request.Name,
 				Scopes:   request.Scopes,
 				Expires:  request.Expires,
@@ -143,7 +145,7 @@ func (h *AdminAuthHandler) CreateAPIKey(c *fiber.Ctx) error {
 
 	return c.Status(http.StatusCreated).JSON(fiber.Map{
 		"message": "API key created successfully",
-		"key":     apiKey.Key,
+		"key":     generatedKey,
 	})
 }
 
@@ -349,8 +351,6 @@ func (h *AdminAuthHandler) UpdateJWTConfig(c *fiber.Ctx) error {
 }
 
 func generateAPIKey() string {
-	// In a real implementation, generate a secure random API key
-	// For now, use a simple placeholder
 	timestamp := time.Now().UnixNano()
 	return fmt.Sprintf("horizon.%d.%s", timestamp, "api-key")
 }

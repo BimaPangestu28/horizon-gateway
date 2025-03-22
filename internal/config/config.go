@@ -184,7 +184,7 @@ func LoadConfig(path string) (*Config, error) {
 	// Check if this is a versioned config
 	if err == nil && versionedConfig.Version != "" && versionedConfig.Config != nil {
 		// Apply migration if needed
-		config, err := MigrateConfig(versionedConfig.Config, versionedConfig.Version)
+		config, err := MigrateConfig(versionedConfig.Config, ConfigVersion(versionedConfig.Version))
 		if err != nil {
 			return nil, fmt.Errorf("migrating config: %w", err)
 		}

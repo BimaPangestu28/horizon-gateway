@@ -1,6 +1,3 @@
-// Fix for internal/core/health_checker.go:122:17: declared and not used: check
-// internal/core/health_checker.go
-
 package core
 
 import (

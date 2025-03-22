@@ -14,14 +14,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// VersionedConfig represents a configuration with version information
 type VersionedConfig struct {
-	Version    string      `yaml:"version" json:"version"`
-	ConfigHash string      `yaml:"config_hash" json:"config_hash"`
-	ModifiedAt time.Time   `yaml:"modified_at" json:"modified_at"`
-	Config     *Config     `yaml:"config" json:"config"`
-	Metadata   interface{} `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Version    string      `yaml:"version"`
+	ConfigHash string      `yaml:"config_hash"`
+	ModifiedAt time.Time   `yaml:"modified_at"`
+	Config     *Config     `yaml:"config"`
+	Metadata   interface{} `yaml:"metadata,omitempty"`
 }
 
+// ConfigHistory represents a backup entry in the history
 type ConfigHistory struct {
 	BackupID  string    `json:"backup_id"`
 	Version   string    `json:"version"`
@@ -30,6 +32,7 @@ type ConfigHistory struct {
 	Path      string    `json:"path"`
 }
 
+// SaveConfig saves a versioned configuration to a file
 func SaveConfig(cfg *VersionedConfig, path string) error {
 	if cfg.ConfigHash == "" {
 		hash, err := calculateConfigHash(cfg.Config)
@@ -56,6 +59,7 @@ func SaveConfig(cfg *VersionedConfig, path string) error {
 	return nil
 }
 
+// LoadVersionedConfig loads a versioned configuration from a file
 func LoadVersionedConfig(path string) (*VersionedConfig, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
@@ -71,6 +75,7 @@ func LoadVersionedConfig(path string) (*VersionedConfig, error) {
 	return &versionedConfig, nil
 }
 
+// calculateConfigHash calculates a hash of the configuration
 func calculateConfigHash(cfg *Config) (string, error) {
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -81,6 +86,7 @@ func calculateConfigHash(cfg *Config) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
+// BackupConfig creates a backup of the configuration
 func BackupConfig(cfg *VersionedConfig, backupsDir string) (string, error) {
 	err := os.MkdirAll(backupsDir, 0755)
 	if err != nil {
@@ -111,6 +117,7 @@ func BackupConfig(cfg *VersionedConfig, backupsDir string) (string, error) {
 	return backupID, nil
 }
 
+// GetConfigBackups retrieves the list of configuration backups
 func GetConfigBackups(backupsDir string) ([]ConfigHistory, error) {
 	indexPath := filepath.Join(backupsDir, "backup_index.json")
 
@@ -136,6 +143,7 @@ func GetConfigBackups(backupsDir string) ([]ConfigHistory, error) {
 	return backups, nil
 }
 
+// RestoreConfigBackup restores a configuration from a backup
 func RestoreConfigBackup(backupID string, backupsDir string) (*VersionedConfig, error) {
 	backups, err := GetConfigBackups(backupsDir)
 	if err != nil {
@@ -160,6 +168,7 @@ func RestoreConfigBackup(backupID string, backupsDir string) (*VersionedConfig, 
 	return LoadVersionedConfig(backup.Path)
 }
 
+// updateBackupIndex updates the backup index with a new entry
 func updateBackupIndex(backupsDir string, newBackup ConfigHistory) error {
 	indexPath := filepath.Join(backupsDir, "backup_index.json")
 

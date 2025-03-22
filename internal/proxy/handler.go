@@ -21,12 +21,17 @@ import (
 
 const RequestTimeout = 30 * time.Second
 
+// Handler implements the proxy handler
 type Handler struct {
-	router interfaces.Router
+	router interfaces.Router // Use the interface instead of concrete type
 	logger logging.Logger
 	client *http.Client
 }
 
+// Ensure Handler implements interfaces.ProxyHandlerInterface
+var _ interfaces.ProxyHandlerInterface = (*Handler)(nil)
+
+// New creates a new proxy handler
 func New(router interfaces.Router, logger logging.Logger) *Handler {
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -44,6 +49,7 @@ func New(router interfaces.Router, logger logging.Logger) *Handler {
 	}
 }
 
+// HandleRequest processes the incoming HTTP request and forwards it to the upstream service
 func (h *Handler) HandleRequest(c *fiber.Ctx) error {
 	// Convert fiber context to http.Request for router matching
 	httpReq := &http.Request{
@@ -119,6 +125,7 @@ func (h *Handler) HandleRequest(c *fiber.Ctx) error {
 	return c.Send(body)
 }
 
+// forwardRequest forwards the request to the upstream service
 func (h *Handler) forwardRequest(ctx context.Context, c *fiber.Ctx, route *types.Route) (*http.Response, error) {
 	targetURL, err := url.Parse(route.UpstreamURL)
 	if err != nil {
@@ -180,8 +187,4 @@ func (h *Handler) forwardRequest(ctx context.Context, c *fiber.Ctx, route *types
 	}
 
 	return resp, nil
-}
-
-func (h *Handler) GetRouter() interfaces.Router {
-	return h.router
 }
