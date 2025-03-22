@@ -87,6 +87,8 @@ func (h *AdminAuthHandler) CreateAPIKey(c *fiber.Ctx) error {
 	cfg := h.configWatcher.GetConfig()
 
 	var routeFound bool
+	var generatedKey string // Declare the variable to store the generated key
+
 	for i, route := range cfg.Routes {
 		if route.Name == request.RouteName {
 			routeFound = true
@@ -106,7 +108,7 @@ func (h *AdminAuthHandler) CreateAPIKey(c *fiber.Ctx) error {
 				})
 			}
 
-			generatedKey := generateAPIKey()
+			generatedKey = generateAPIKey() // Store the generated key
 
 			apiKey := auth.APIKey{
 				Key:      generatedKey,
