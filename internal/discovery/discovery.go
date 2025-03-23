@@ -26,6 +26,7 @@ type ServiceInstance struct {
 	Zone      string
 	Version   string
 	LastCheck time.Time
+	TTL       time.Duration
 }
 
 type ServiceDiscovery interface {
@@ -76,8 +77,8 @@ func NewServiceRegistry() *ServiceRegistry {
 	}
 }
 
-func (r *ServiceRegistry) RegisterDiscovery(name string, discovery ServiceDiscovery) {
-	r.discoveries[name] = discovery
+func (r *ServiceRegistry) RegisterDiscovery(discoveryType string, discovery ServiceDiscovery) {
+	r.discoveries[discoveryType] = discovery
 }
 
 func (r *ServiceRegistry) GetDiscovery(name string) (ServiceDiscovery, bool) {
@@ -86,7 +87,7 @@ func (r *ServiceRegistry) GetDiscovery(name string) (ServiceDiscovery, bool) {
 }
 
 func (r *ServiceRegistry) Initialize(ctx context.Context) error {
-	for name, discovery := range r.discoveries {
+	for _, discovery := range r.discoveries {
 		if err := discovery.Initialize(ctx); err != nil {
 			return err
 		}

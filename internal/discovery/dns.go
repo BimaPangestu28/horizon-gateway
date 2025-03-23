@@ -132,6 +132,37 @@ func (d *DNSServiceDiscovery) refreshAllServices() {
 	}
 }
 
+func (d *DNSServiceDiscovery) resolveHost(ctx context.Context, host string) ([]string, error) {
+	var addrs []string
+
+	switch d.config.QueryType {
+	case "A":
+		ipAddrs, err := d.resolver.LookupHost(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("DNS lookup failed: %w", err)
+		}
+		addrs = ipAddrs
+	case "SRV":
+		_, srvs, err := d.resolver.LookupSRV(ctx, "", "", host)
+		if err != nil {
+			return nil, fmt.Errorf("SRV lookup failed: %w", err)
+		}
+
+		for _, srv := range srvs {
+			addr := fmt.Sprintf("%s:%d", srv.Target, srv.Port)
+			addrs = append(addrs, addr)
+		}
+	default:
+		ipAddrs, err := d.resolver.LookupHost(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("DNS lookup failed: %w", err)
+		}
+		addrs = ipAddrs
+	}
+
+	return addrs, nil
+}
+
 func (d *DNSServiceDiscovery) GetService(ctx context.Context, name string) ([]ServiceInstance, error) {
 	if !d.initialized {
 		return nil, fmt.Errorf("DNS service discovery not initialized")
@@ -162,7 +193,7 @@ func (d *DNSServiceDiscovery) GetService(ctx context.Context, name string) ([]Se
 		return nil, ErrServiceNotFound
 	}
 
-	instances := make([]ServiceInstance, 0, len(addrs))
+	instances = make([]ServiceInstance, 0, len(addrs))
 	for i, addr := range addrs {
 		instance := ServiceInstance{
 			ID:        fmt.Sprintf("%s-%d", name, i),
