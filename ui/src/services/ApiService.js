@@ -1,7 +1,8 @@
 class ApiService {
   constructor() {
     this.baseUrl =
-      process.env.REACT_APP_API_URL || 'http://localhost:8081/admin';
+      import.meta.env.VITE_API_URL || 'http://localhost:8081/admin';
+
     this.token = localStorage.getItem('auth_token');
   }
 
