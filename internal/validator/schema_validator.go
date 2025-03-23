@@ -63,13 +63,22 @@ func NewSchemaValidator(config *OpenAPIValidationConfig, logger logging.Logger) 
 	}
 
 	operations := make(map[string]*openapi3.Operation)
-	for path, pathItem := range swagger.Paths {
-		for method, operation := range pathItem.Operations() {
-			operationID := method + " " + path
-			if operation.OperationID != "" {
-				operationID = operation.OperationID
+
+	// Fix the error with ranging over swagger.Paths
+	// We're accessing the paths map via the Map() method instead
+	if swagger.Paths != nil {
+		for path, pathItem := range swagger.Paths.Map() {
+			if pathItem == nil {
+				continue
 			}
-			operations[operationID] = operation
+
+			for method, operation := range pathItem.Operations() {
+				operationID := method + " " + path
+				if operation.OperationID != "" {
+					operationID = operation.OperationID
+				}
+				operations[operationID] = operation
+			}
 		}
 	}
 
@@ -182,20 +191,25 @@ func (v *SchemaValidator) ValidatePayload(operationID string, payload []byte, pa
 		return result, nil
 	}
 
-	err := openapi3.ValidateValue(context.Background(), schema, jsonData)
+	// Fix the ValidateValue undefined error by implementing our own validation
+	// using the schema.VisitJSON method
+	err := validateJSONValue(schema, jsonData)
 	if err != nil {
 		result.Valid = false
 		result.Message = fmt.Sprintf("%s validation failed", payloadType)
-
-		switch e := err.(type) {
-		case *openapi3.SchemaError:
-			result.Errors = append(result.Errors, e.Error())
-		default:
-			result.Errors = append(result.Errors, err.Error())
-		}
+		result.Errors = append(result.Errors, err.Error())
 	}
 
 	return result, nil
+}
+
+// Custom validator to replace the undefined openapi3.ValidateValue
+func validateJSONValue(schema *openapi3.Schema, value interface{}) error {
+	err := schema.VisitJSON(value)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (v *SchemaValidator) GetOperationIDs() []string {
@@ -227,8 +241,11 @@ func (v *SchemaValidator) MapPathToOperation(method, path string) (string, error
 func (v *SchemaValidator) GetRoutePatterns() []string {
 	patterns := make([]string, 0)
 
-	for path := range v.swagger.Paths {
-		patterns = append(patterns, path)
+	// Fix the ranging over v.swagger.Paths error
+	if v.swagger.Paths != nil {
+		for path := range v.swagger.Paths.Map() {
+			patterns = append(patterns, path)
+		}
 	}
 
 	return patterns

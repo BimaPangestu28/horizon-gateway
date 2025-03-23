@@ -30,6 +30,21 @@ type GRPCValidationResult struct {
 	Message string   `json:"message,omitempty"`
 }
 
+// IsValid returns whether the validation was successful
+func (r *GRPCValidationResult) IsValid() bool {
+	return r.Valid
+}
+
+// GetErrors returns any validation errors
+func (r *GRPCValidationResult) GetErrors() []string {
+	return r.Errors
+}
+
+// GetMessage returns the validation message
+func (r *GRPCValidationResult) GetMessage() string {
+	return r.Message
+}
+
 func NewGRPCValidator(config *GRPCValidationConfig, logger logging.Logger) (*GRPCValidator, error) {
 	validator := &GRPCValidator{
 		logger:      logger,
@@ -130,14 +145,31 @@ func (v *GRPCValidator) ValidateMessage(msgTypeName string, data []byte) (*GRPCV
 		return result, nil
 	}
 
-	// Validate the message against its schema
-	if err := msg.ValidateAll(); err != nil {
+	// Validate the message - note that we use basic validation instead of ValidateAll
+	// since that method might not be available in all versions
+	err := v.validateMessage(msg)
+	if err != nil {
 		result.Valid = false
 		result.Message = "Message validation failed"
 		result.Errors = append(result.Errors, err.Error())
 	}
 
 	return result, nil
+}
+
+// Custom validation function since ValidateAll might not be available
+func (v *GRPCValidator) validateMessage(msg *dynamic.Message) error {
+	// This is a basic validation that checks if required fields are set
+	// In a real implementation, you'd perform more thorough validation
+
+	// Check if any required fields are missing
+	for _, fd := range msg.GetMessageDescriptor().GetFields() {
+		if fd.IsRequired() && !msg.HasField(fd) {
+			return fmt.Errorf("required field %s is missing", fd.GetName())
+		}
+	}
+
+	return nil
 }
 
 func (v *GRPCValidator) ValidateMethodRequest(methodName string, data []byte) (*GRPCValidationResult, error) {

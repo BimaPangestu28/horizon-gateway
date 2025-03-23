@@ -6,10 +6,12 @@ import (
 	"net/http"
 )
 
+// Validator interface defines validation functionality
 type Validator interface {
-	Validate(ctx context.Context, data interface{}) (ValidationResult, error)
+	Validate(ctx context.Context, data interface{}) (*ValidationResult, error)
 }
 
+// ValidationRegistry stores registered validators
 type ValidatorRegistry struct {
 	validators map[string]Validator
 }
@@ -37,6 +39,7 @@ func (r *ValidatorRegistry) GetAll() map[string]Validator {
 	return validators
 }
 
+// Request validator adapter
 type RequestValidatorAdapter struct {
 	validator *RequestValidator
 }
@@ -47,7 +50,7 @@ func NewRequestValidatorAdapter(validator *RequestValidator) *RequestValidatorAd
 	}
 }
 
-func (a *RequestValidatorAdapter) Validate(ctx context.Context, data interface{}) (ValidationResult, error) {
+func (a *RequestValidatorAdapter) Validate(ctx context.Context, data interface{}) (*ValidationResult, error) {
 	if req, ok := data.(*http.Request); ok {
 		routeName := ctx.Value("route_name").(string)
 		return a.validator.ValidateRequest(req, routeName)
@@ -55,6 +58,7 @@ func (a *RequestValidatorAdapter) Validate(ctx context.Context, data interface{}
 	return nil, ErrInvalidDataType
 }
 
+// JWT validator adapter
 type JWTValidatorAdapter struct {
 	validator *JWTValidator
 }
@@ -65,13 +69,23 @@ func NewJWTValidatorAdapter(validator *JWTValidator) *JWTValidatorAdapter {
 	}
 }
 
-func (a *JWTValidatorAdapter) Validate(ctx context.Context, data interface{}) (ValidationResult, error) {
+func (a *JWTValidatorAdapter) Validate(ctx context.Context, data interface{}) (*ValidationResult, error) {
 	if tokenString, ok := data.(string); ok {
-		return a.validator.ValidateToken(tokenString), nil
+		jwtResult := a.validator.ValidateToken(tokenString)
+		// Convert JWTValidationResult to ValidationResult
+		result := &ValidationResult{
+			Valid: jwtResult.Valid,
+		}
+		if jwtResult.Error != nil {
+			result.Errors = []string{jwtResult.Error.Error()}
+			result.Message = jwtResult.Error.Error()
+		}
+		return result, nil
 	}
 	return nil, ErrInvalidDataType
 }
 
+// Schema validator adapter
 type SchemaValidatorAdapter struct {
 	validator *SchemaValidator
 }
@@ -82,13 +96,24 @@ func NewSchemaValidatorAdapter(validator *SchemaValidator) *SchemaValidatorAdapt
 	}
 }
 
-func (a *SchemaValidatorAdapter) Validate(ctx context.Context, data interface{}) (ValidationResult, error) {
+func (a *SchemaValidatorAdapter) Validate(ctx context.Context, data interface{}) (*ValidationResult, error) {
 	if req, ok := data.(*http.Request); ok {
-		return a.validator.ValidateRequest(req)
+		schemaResult, err := a.validator.ValidateRequest(req)
+		if err != nil {
+			return nil, err
+		}
+		// Convert SchemaValidationResult to ValidationResult
+		result := &ValidationResult{
+			Valid:   schemaResult.Valid,
+			Errors:  schemaResult.Errors,
+			Message: schemaResult.Message,
+		}
+		return result, nil
 	}
 	return nil, ErrInvalidDataType
 }
 
+// GRPC validator adapter
 type GRPCValidatorAdapter struct {
 	validator *GRPCValidator
 }
@@ -99,14 +124,25 @@ func NewGRPCValidatorAdapter(validator *GRPCValidator) *GRPCValidatorAdapter {
 	}
 }
 
-func (a *GRPCValidatorAdapter) Validate(ctx context.Context, data interface{}) (ValidationResult, error) {
+func (a *GRPCValidatorAdapter) Validate(ctx context.Context, data interface{}) (*ValidationResult, error) {
 	if bytes, ok := data.([]byte); ok {
 		msgType := ctx.Value("message_type").(string)
-		return a.validator.ValidateMessage(msgType, bytes)
+		grpcResult, err := a.validator.ValidateMessage(msgType, bytes)
+		if err != nil {
+			return nil, err
+		}
+		// Convert GRPCValidationResult to ValidationResult
+		result := &ValidationResult{
+			Valid:   grpcResult.Valid,
+			Errors:  grpcResult.Errors,
+			Message: grpcResult.Message,
+		}
+		return result, nil
 	}
 	return nil, ErrInvalidDataType
 }
 
+// URL validator adapter
 type URLValidatorAdapter struct {
 	validator *URLValidator
 }
@@ -117,9 +153,16 @@ func NewURLValidatorAdapter(validator *URLValidator) *URLValidatorAdapter {
 	}
 }
 
-func (a *URLValidatorAdapter) Validate(ctx context.Context, data interface{}) (ValidationResult, error) {
+func (a *URLValidatorAdapter) Validate(ctx context.Context, data interface{}) (*ValidationResult, error) {
 	if urlStr, ok := data.(string); ok {
-		return a.validator.ValidateURL(urlStr), nil
+		urlResult := a.validator.ValidateURL(urlStr)
+		// Convert URLValidationResult to ValidationResult
+		result := &ValidationResult{
+			Valid:   urlResult.Valid,
+			Errors:  urlResult.Errors,
+			Message: urlResult.Message,
+		}
+		return result, nil
 	}
 	return nil, ErrInvalidDataType
 }
@@ -127,71 +170,3 @@ func (a *URLValidatorAdapter) Validate(ctx context.Context, data interface{}) (V
 var (
 	ErrInvalidDataType = errors.New("invalid data type for validator")
 )
-
-// Make ValidationResult implementations conform to the interface
-
-func (r *ValidationResult) IsValid() bool {
-	return r.Valid
-}
-
-func (r *ValidationResult) GetErrors() []string {
-	return r.Errors
-}
-
-func (r *ValidationResult) GetMessage() string {
-	return r.Message
-}
-
-func (r *JWTValidationResult) IsValid() bool {
-	return r.Valid
-}
-
-func (r *JWTValidationResult) GetErrors() []string {
-	if r.Error != nil {
-		return []string{r.Error.Error()}
-	}
-	return nil
-}
-
-func (r *JWTValidationResult) GetMessage() string {
-	if r.Error != nil {
-		return r.Error.Error()
-	}
-	return ""
-}
-
-func (r *SchemaValidationResult) IsValid() bool {
-	return r.Valid
-}
-
-func (r *SchemaValidationResult) GetErrors() []string {
-	return r.Errors
-}
-
-func (r *SchemaValidationResult) GetMessage() string {
-	return r.Message
-}
-
-func (r *GRPCValidationResult) IsValid() bool {
-	return r.Valid
-}
-
-func (r *GRPCValidationResult) GetErrors() []string {
-	return r.Errors
-}
-
-func (r *GRPCValidationResult) GetMessage() string {
-	return r.Message
-}
-
-func (r *URLValidationResult) IsValid() bool {
-	return r.Valid
-}
-
-func (r *URLValidationResult) GetErrors() []string {
-	return r.Errors
-}
-
-func (r *URLValidationResult) GetMessage() string {
-	return r.Message
-}

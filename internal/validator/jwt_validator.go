@@ -14,7 +14,7 @@ type JWTValidator struct {
 	logger    logging.Logger
 	keyFunc   jwt.Keyfunc
 	config    *JWTConfig
-	parseOpts []jwt.ParserOption
+	clockSkew time.Duration
 }
 
 type JWTConfig struct {
@@ -37,6 +37,27 @@ type JWTValidationResult struct {
 	Error     error
 }
 
+// IsValid returns whether the validation was successful
+func (r *JWTValidationResult) IsValid() bool {
+	return r.Valid
+}
+
+// GetErrors returns any validation errors
+func (r *JWTValidationResult) GetErrors() []string {
+	if r.Error != nil {
+		return []string{r.Error.Error()}
+	}
+	return nil
+}
+
+// GetMessage returns the validation message
+func (r *JWTValidationResult) GetMessage() string {
+	if r.Error != nil {
+		return r.Error.Error()
+	}
+	return ""
+}
+
 func NewJWTValidator(config *JWTConfig, logger logging.Logger) (*JWTValidator, error) {
 	if config == nil {
 		return nil, errors.New("JWT configuration is required")
@@ -51,8 +72,9 @@ func NewJWTValidator(config *JWTConfig, logger logging.Logger) (*JWTValidator, e
 	}
 
 	validator := &JWTValidator{
-		logger: logger,
-		config: config,
+		logger:    logger,
+		config:    config,
+		clockSkew: time.Duration(config.ClockSkewSeconds) * time.Second,
 	}
 
 	validator.keyFunc = func(token *jwt.Token) (interface{}, error) {
@@ -77,10 +99,6 @@ func NewJWTValidator(config *JWTConfig, logger logging.Logger) (*JWTValidator, e
 		}
 	}
 
-	validator.parseOpts = []jwt.ParserOption{
-		jwt.WithLeeway(time.Duration(config.ClockSkewSeconds) * time.Second),
-	}
-
 	return validator, nil
 }
 
@@ -98,9 +116,33 @@ func (v *JWTValidator) ValidateToken(tokenString string) *JWTValidationResult {
 	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
 	tokenString = strings.TrimSpace(tokenString)
 
-	// Parse the token
-	parser := jwt.NewParser(v.parseOpts...)
+	// Create parser with options
+	parser := jwt.NewParser()
+
+	// Parse the token - handling clock skew internally
 	token, err := parser.Parse(tokenString, v.keyFunc)
+
+	// Handle verification errors
+	if err != nil {
+		// Check if it's a validation error
+		if validationErr, ok := err.(*jwt.ValidationError); ok {
+			// Check if it's a time validation error
+			if validationErr.Errors&jwt.ValidationErrorExpired != 0 {
+				// Check with the clock skew applied
+				claims, ok := token.Claims.(jwt.MapClaims)
+				if ok {
+					if exp, ok := claims["exp"].(float64); ok {
+						expTime := time.Unix(int64(exp), 0)
+						if time.Now().Add(v.clockSkew).Before(expTime) {
+							// Within clock skew, consider it valid
+							err = nil
+							token.Valid = true
+						}
+					}
+				}
+			}
+		}
+	}
 
 	if err != nil {
 		result.Error = err

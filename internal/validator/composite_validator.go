@@ -14,10 +14,10 @@ type CompositeValidator struct {
 }
 
 type CompositeValidationResult struct {
-	Valid   bool                        `json:"valid"`
-	Errors  []string                    `json:"errors,omitempty"`
-	Message string                      `json:"message,omitempty"`
-	Results map[string]ValidationResult `json:"results,omitempty"`
+	Valid   bool                         `json:"valid"`
+	Errors  []string                     `json:"errors,omitempty"`
+	Message string                       `json:"message,omitempty"`
+	Results map[string]*ValidationResult `json:"results,omitempty"`
 }
 
 func NewCompositeValidator(validators []Validator, logger logging.Logger, stopOnFirst bool) *CompositeValidator {
@@ -28,11 +28,11 @@ func NewCompositeValidator(validators []Validator, logger logging.Logger, stopOn
 	}
 }
 
-func (v *CompositeValidator) Validate(ctx context.Context, data interface{}) (ValidationResult, error) {
-	result := &CompositeValidationResult{
+func (v *CompositeValidator) Validate(ctx context.Context, data interface{}) (*ValidationResult, error) {
+	composite := &CompositeValidationResult{
 		Valid:   true,
 		Errors:  []string{},
-		Results: make(map[string]ValidationResult),
+		Results: make(map[string]*ValidationResult),
 	}
 
 	validatorNames := ctx.Value("validator_names")
@@ -57,11 +57,11 @@ func (v *CompositeValidator) Validate(ctx context.Context, data interface{}) (Va
 			continue
 		}
 
-		result.Results[validatorName] = valResult
+		composite.Results[validatorName] = valResult
 
-		if !valResult.IsValid() {
-			result.Valid = false
-			result.Errors = append(result.Errors, valResult.GetErrors()...)
+		if !valResult.Valid {
+			composite.Valid = false
+			composite.Errors = append(composite.Errors, valResult.Errors...)
 
 			if v.stopOnFirst {
 				break
@@ -69,23 +69,18 @@ func (v *CompositeValidator) Validate(ctx context.Context, data interface{}) (Va
 		}
 	}
 
-	if !result.Valid {
-		result.Message = "Validation failed"
+	if !composite.Valid {
+		composite.Message = "Validation failed"
+	}
+
+	// Convert CompositeValidationResult to ValidationResult
+	result := &ValidationResult{
+		Valid:   composite.Valid,
+		Errors:  composite.Errors,
+		Message: composite.Message,
 	}
 
 	return result, nil
-}
-
-func (r *CompositeValidationResult) IsValid() bool {
-	return r.Valid
-}
-
-func (r *CompositeValidationResult) GetErrors() []string {
-	return r.Errors
-}
-
-func (r *CompositeValidationResult) GetMessage() string {
-	return r.Message
 }
 
 func (v *CompositeValidator) AddValidator(validator Validator) {
