@@ -10,7 +10,7 @@ import (
 	"github.com/bimapangestu28/horizon/internal/security/ratelimit"
 	"github.com/bimapangestu28/horizon/internal/transform"
 	"github.com/bimapangestu28/horizon/internal/types"
-	"github.com/bimapangestu28/horizon/plugins/interfaces"
+	interfaces "github.com/bimapangestu28/horizon/plugins/interfaces"
 )
 
 type RouteConfig struct {

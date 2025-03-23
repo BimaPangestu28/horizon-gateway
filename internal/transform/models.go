@@ -89,13 +89,6 @@ type BodyTransform struct {
 	JSONPath     []JSONPathTransform `yaml:"jsonpath,omitempty"`
 }
 
-// JSONPathTransform defines a JSONPath transformation
-type JSONPathTransform struct {
-	Path      string             `yaml:"path"`
-	Operation TransformOperation `yaml:"operation"`
-	Value     interface{}        `yaml:"value,omitempty"`
-}
-
 // StatusCodeTransform defines a status code transformation
 type StatusCodeTransform struct {
 	Operation TransformOperation `yaml:"operation"`

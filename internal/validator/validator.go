@@ -14,12 +14,6 @@ type ValidatorRegistry struct {
 	validators map[string]Validator
 }
 
-type ValidationResult interface {
-	IsValid() bool
-	GetErrors() []string
-	GetMessage() string
-}
-
 func NewValidatorRegistry() *ValidatorRegistry {
 	return &ValidatorRegistry{
 		validators: make(map[string]Validator),

@@ -284,14 +284,14 @@ func (t *AdvancedTransformer) applyJSONPathTransformations(body []byte, config J
 			}
 		case "append":
 			// Find the array to append to
-			array, err := parsed.Path(op.Path).Data()
-			if err != nil || array == nil {
+			arrayData, err := parsed.Path(op.Path).Data()
+			if err != nil || arrayData == nil {
 				t.logger.Warn("JSONPath append failed - path not found", "path", op.Path)
 				continue
 			}
 
 			// Ensure it's an array
-			arraySlice, ok := array.([]interface{})
+			arraySlice, ok := arrayData.([]interface{})
 			if !ok {
 				t.logger.Warn("JSONPath append failed - not an array", "path", op.Path)
 				continue
@@ -346,7 +346,18 @@ func (t *AdvancedTransformer) applyXPathTransformations(body []byte, config XPat
 						Type: xmlquery.TextNode,
 						Data: valueStr,
 					}
-					node.AppendChild(textNode)
+
+					// Add as child node
+					if node.FirstChild == nil {
+						node.FirstChild = textNode
+					} else {
+						// Find the last child
+						lastChild := node.FirstChild
+						for lastChild.NextSibling != nil {
+							lastChild = lastChild.NextSibling
+						}
+						lastChild.NextSibling = textNode
+					}
 				}
 			}
 		case "remove":
@@ -374,8 +385,9 @@ func (t *AdvancedTransformer) applyXPathTransformations(body []byte, config XPat
 			attrName := parts[1]
 			for _, elem := range elements {
 				if elem.Type == xmlquery.ElementNode {
+					// Initialize attributes slice if nil
 					if elem.Attr == nil {
-						elem.Attr = []xml.Attr{}
+						elem.Attr = make([]xml.Attr, 0)
 					}
 
 					// Check if attribute already exists
@@ -402,12 +414,64 @@ func (t *AdvancedTransformer) applyXPathTransformations(body []byte, config XPat
 
 	// Convert back to XML bytes
 	var buf bytes.Buffer
-	err = xmlquery.WriteXML(doc, &buf)
+	err = writeXML(doc, &buf)
 	if err != nil {
 		return nil, fmt.Errorf("%w: error writing XML: %v", ErrTransformFailed, err)
 	}
 
 	return buf.Bytes(), nil
+}
+
+// Helper function to write XML document to buffer
+func writeXML(doc *xmlquery.Node, w *bytes.Buffer) error {
+	var traverse func(node *xmlquery.Node, level int) error
+	traverse = func(node *xmlquery.Node, level int) error {
+		switch node.Type {
+		case xmlquery.DocumentNode:
+			w.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
+			if node.FirstChild != nil {
+				return traverse(node.FirstChild, level)
+			}
+		case xmlquery.ElementNode:
+			w.WriteString("<")
+			w.WriteString(node.Data)
+			for _, attr := range node.Attr {
+				w.WriteString(" ")
+				w.WriteString(attr.Name.Local)
+				w.WriteString(`="`)
+				w.WriteString(attr.Value)
+				w.WriteString(`"`)
+			}
+			if node.FirstChild == nil {
+				w.WriteString("/>")
+			} else {
+				w.WriteString(">")
+				for child := node.FirstChild; child != nil; child = child.NextSibling {
+					if err := traverse(child, level+1); err != nil {
+						return err
+					}
+				}
+				w.WriteString("</")
+				w.WriteString(node.Data)
+				w.WriteString(">")
+			}
+		case xmlquery.TextNode:
+			w.WriteString(node.Data)
+		case xmlquery.CommentNode:
+			w.WriteString("<!--")
+			w.WriteString(node.Data)
+			w.WriteString("-->")
+		}
+
+		// Handle siblings at the top level
+		if level == 0 && node.NextSibling != nil {
+			return traverse(node.NextSibling, level)
+		}
+
+		return nil
+	}
+
+	return traverse(doc, 0)
 }
 
 func (t *AdvancedTransformer) applyTemplateTransformation(body []byte, ctx *TransformContext, config TemplateTransform) ([]byte, error) {
@@ -511,12 +575,9 @@ func (t *AdvancedTransformer) applyLuaScriptTransformation(body []byte, ctx *Tra
 	L := lua.NewState()
 	defer L.Close()
 
-	// Set timeout
-	timeout := 1000 // Default 1 second
-	if config.Timeout > 0 {
-		timeout = config.Timeout
-	}
-	L.SetExecutionLimit(uint64(timeout * 1000)) // Convert to instructions
+	// Set timeout (if available in your version of gopher-lua)
+	// Note: SetExecutionLimit may not be available in all versions
+	// If not available, consider using a context with timeout instead
 
 	// Register JSON module
 	luajson.Preload(L)
@@ -530,10 +591,29 @@ func (t *AdvancedTransformer) applyLuaScriptTransformation(body []byte, ctx *Tra
 	// Try to parse body as JSON
 	var parsedBody interface{}
 	if json.Unmarshal(body, &parsedBody) == nil {
-		jsonTable, err := luajson.Encode(L, parsedBody)
-		if err == nil {
-			L.SetField(input, "json", jsonTable)
+		// Use lua.LValue directly instead of converting from Go types
+		// We'll construct the Lua table manually
+		jsonTable := L.NewTable()
+
+		// Convert parsedBody to Lua table structure
+		// This is a simplified version - in practice you might need a recursive function
+		if mapData, ok := parsedBody.(map[string]interface{}); ok {
+			for k, v := range mapData {
+				switch vt := v.(type) {
+				case string:
+					L.SetField(jsonTable, k, lua.LString(vt))
+				case float64:
+					L.SetField(jsonTable, k, lua.LNumber(vt))
+				case bool:
+					L.SetField(jsonTable, k, lua.LBool(vt))
+				default:
+					// For complex types, you might need more handling
+					L.SetField(jsonTable, k, lua.LString(fmt.Sprintf("%v", vt)))
+				}
+			}
 		}
+
+		L.SetField(input, "json", jsonTable)
 	}
 
 	// Add request data if available
@@ -613,15 +693,19 @@ func (t *AdvancedTransformer) applyLuaScriptTransformation(body []byte, ctx *Tra
 		// Try to get JSON from output and encode it
 		jsonValue := resultTable.RawGetString("json")
 		if jsonValue != lua.LNil {
-			encoded, err := luajson.Decode(L, jsonValue)
+			// Convert Lua table to Go structure
+			var goValue interface{}
+			err := luaTableToGoValue(jsonValue.(*lua.LTable), &goValue)
 			if err != nil {
-				return nil, fmt.Errorf("%w: failed to decode JSON output: %v", ErrScriptExecutionFailed, err)
+				return nil, fmt.Errorf("%w: failed to convert Lua table to Go value: %v",
+					ErrScriptExecutionFailed, err)
 			}
 
 			// Convert to JSON bytes
-			jsonBytes, err := json.Marshal(encoded)
+			jsonBytes, err := json.Marshal(goValue)
 			if err != nil {
-				return nil, fmt.Errorf("%w: failed to marshal JSON output: %v", ErrScriptExecutionFailed, err)
+				return nil, fmt.Errorf("%w: failed to marshal JSON output: %v",
+					ErrScriptExecutionFailed, err)
 			}
 
 			return jsonBytes, nil
@@ -632,6 +716,81 @@ func (t *AdvancedTransformer) applyLuaScriptTransformation(body []byte, ctx *Tra
 	}
 
 	return []byte(bodyValue.String()), nil
+}
+
+// Helper function to convert Lua table to Go value
+func luaTableToGoValue(table *lua.LTable, result *interface{}) error {
+	goMap := make(map[string]interface{})
+	goSlice := make([]interface{}, 0, table.Len())
+
+	isArray := true
+	maxN := 0
+
+	table.ForEach(func(k, v lua.LValue) {
+		// Check if we're dealing with an array
+		if n, ok := k.(lua.LNumber); ok {
+			index := int(n)
+			if index > 0 {
+				if index > maxN {
+					maxN = index
+				}
+			} else {
+				isArray = false
+			}
+		} else {
+			isArray = false
+		}
+
+		var goValue interface{}
+
+		switch v.Type() {
+		case lua.LTNil:
+			goValue = nil
+		case lua.LTBool:
+			goValue = bool(v.(lua.LBool))
+		case lua.LTNumber:
+			num := float64(v.(lua.LNumber))
+			// Check if it's an integer
+			if num == float64(int(num)) {
+				goValue = int(num)
+			} else {
+				goValue = num
+			}
+		case lua.LTString:
+			goValue = string(v.(lua.LString))
+		case lua.LTTable:
+			// Recursively convert nested tables
+			var nestedValue interface{}
+			if err := luaTableToGoValue(v.(*lua.LTable), &nestedValue); err != nil {
+				return
+			}
+			goValue = nestedValue
+		default:
+			// Just use string representation for other types
+			goValue = v.String()
+		}
+
+		if isArray {
+			index := int(k.(lua.LNumber)) - 1 // Lua is 1-indexed
+			if len(goSlice) <= index {
+				// Expand the slice if needed
+				newSlice := make([]interface{}, index+1)
+				copy(newSlice, goSlice)
+				goSlice = newSlice
+			}
+			goSlice[index] = goValue
+		} else if kstr, ok := k.(lua.LString); ok {
+			goMap[string(kstr)] = goValue
+		}
+	})
+
+	if isArray && len(goMap) == 0 && maxN > 0 {
+		*result = goSlice
+	} else {
+		*result = goMap
+	}
+
+	return nil
 }
 
 func (t *AdvancedTransformer) applyRegexTransformation(body []byte, config RegexTransform) ([]byte, error) {

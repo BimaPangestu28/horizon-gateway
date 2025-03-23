@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"strings"
 
@@ -22,12 +23,13 @@ type ProtocolTransformer struct {
 }
 
 type ProtocolTransformConfig struct {
-	SourceType    string `yaml:"source_type" json:"source_type"` // json, xml, grpc, etc.
-	TargetType    string `yaml:"target_type" json:"target_type"` // json, xml, grpc, etc.
-	ProtoFile     string `yaml:"proto_file,omitempty" json:"proto_file,omitempty"`
-	MessageType   string `yaml:"message_type,omitempty" json:"message_type,omitempty"`
-	Mapping       string `yaml:"mapping,omitempty" json:"mapping,omitempty"`
-	PreserveNulls bool   `yaml:"preserve_nulls" json:"preserve_nulls"`
+	SourceType    string   `yaml:"source_type" json:"source_type"` // json, xml, grpc, etc.
+	TargetType    string   `yaml:"target_type" json:"target_type"` // json, xml, grpc, etc.
+	ProtoFile     string   `yaml:"proto_file,omitempty" json:"proto_file,omitempty"`
+	MessageType   string   `yaml:"message_type,omitempty" json:"message_type,omitempty"`
+	Mapping       string   `yaml:"mapping,omitempty" json:"mapping,omitempty"`
+	PreserveNulls bool     `yaml:"preserve_nulls" json:"preserve_nulls"`
+	ContentTypes  []string `yaml:"content_types,omitempty" json:"content_types,omitempty"`
 }
 
 func NewProtocolTransformer(config *ProtocolTransformConfig, logger logging.Logger) (*ProtocolTransformer, error) {
@@ -50,15 +52,90 @@ func NewProtocolTransformer(config *ProtocolTransformConfig, logger logging.Logg
 	return t, nil
 }
 
+// TransformRequest transforms the request body from one protocol format to another
+func (t *ProtocolTransformer) TransformRequest(req *http.Request) error {
+	if t.config == nil || t.config.SourceType == "" || t.config.TargetType == "" {
+		return nil
+	}
+
+	// Get the Content-Type header
+	contentTypeHeader := req.Header.Get("Content-Type")
+
+	// Check if this content type should be transformed
+	if !t.shouldTransform(contentTypeHeader) {
+		return nil
+	}
+
+	// Read the request body
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return fmt.Errorf("error reading request body: %w", err)
+	}
+	defer req.Body.Close()
+
+	// Transform the body
+	transformedBody, err := t.Transform(body, req.Header)
+	if err != nil {
+		return err
+	}
+
+	// Replace the request body
+	req.Body = ioutil.NopCloser(strings.NewReader(string(transformedBody)))
+	req.ContentLength = int64(len(transformedBody))
+
+	// Update the Content-Type header based on target type
+	newContentType := getContentTypeForFormat(t.config.TargetType)
+	if newContentType != "" {
+		req.Header.Set("Content-Type", newContentType)
+	}
+
+	return nil
+}
+
+// TransformResponse transforms the response body from one protocol format to another
+func (t *ProtocolTransformer) TransformResponse(resp *http.Response) error {
+	if t.config == nil || t.config.SourceType == "" || t.config.TargetType == "" {
+		return nil
+	}
+
+	// Get the Content-Type header
+	contentTypeHeader := resp.Header.Get("Content-Type")
+
+	// Check if this content type should be transformed
+	if !t.shouldTransform(contentTypeHeader) {
+		return nil
+	}
+
+	// Read the response body
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("error reading response body: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Transform the body
+	transformedBody, err := t.Transform(body, resp.Header)
+	if err != nil {
+		return err
+	}
+
+	// Replace the response body
+	resp.Body = ioutil.NopCloser(strings.NewReader(string(transformedBody)))
+	resp.ContentLength = int64(len(transformedBody))
+
+	// Update the Content-Type header based on target type
+	newContentType := getContentTypeForFormat(t.config.TargetType)
+	if newContentType != "" {
+		resp.Header.Set("Content-Type", newContentType)
+	}
+
+	return nil
+}
+
+// Transform converts data between different formats
 func (t *ProtocolTransformer) Transform(input []byte, headers http.Header) ([]byte, error) {
 	if len(input) == 0 {
 		return input, nil
-	}
-
-	// Determine content type from headers if not specified
-	contentType := ""
-	if ct := headers.Get("Content-Type"); ct != "" {
-		contentType = ct
 	}
 
 	// Convert from source to intermediate format (typically JSON)
@@ -159,6 +236,37 @@ func (t *ProtocolTransformer) Transform(input []byte, headers http.Header) ([]by
 	}
 
 	return output, nil
+}
+
+// shouldTransform checks if the content type should be transformed
+func (t *ProtocolTransformer) shouldTransform(contentType string) bool {
+	// If no content types are specified, transform all
+	if len(t.config.ContentTypes) == 0 {
+		return true
+	}
+
+	// Check if the content type matches any of the configured types
+	for _, ct := range t.config.ContentTypes {
+		if strings.Contains(contentType, ct) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getContentTypeForFormat returns the appropriate content type for a given format
+func getContentTypeForFormat(format string) string {
+	switch format {
+	case "json":
+		return "application/json"
+	case "xml":
+		return "application/xml"
+	case "grpc":
+		return "application/grpc"
+	default:
+		return ""
+	}
 }
 
 func (t *ProtocolTransformer) loadProtoDefinitions() error {
