@@ -81,156 +81,118 @@ func (s *AdminServer) setupRoutes() error {
 	adminCacheHandler := handlers.NewAdminCacheHandler(s.configWatcher, s.logger)
 	metricsHandler := handlers.NewMetricsHandler(s.logger)
 
-	// CRITICAL CHANGE: Move static file serving BEFORE API routes
+	// API Routes - register these first
+	s.app.Get("/health", func(c *fiber.Ctx) error {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"status": "ok",
+			"time":   time.Now().Format(time.RFC3339),
+		})
+	})
+
+	s.app.Get("/metrics", metricsHandler.GetMetrics)
+
+	admin := s.app.Group("/admin")
+
+	admin.Get("/routes", adminHandler.GetRoutes)
+	admin.Get("/routes/:name", adminHandler.GetRoute)
+	admin.Post("/routes", adminHandler.CreateRoute)
+	admin.Put("/routes/:name", adminHandler.UpdateRoute)
+	admin.Delete("/routes/:name", adminHandler.DeleteRoute)
+
+	admin.Get("/config", adminHandler.GetConfig)
+	admin.Put("/config", adminHandler.UpdateConfig)
+	admin.Get("/config/backups", adminHandler.GetConfigBackups)
+	admin.Post("/config/backups/:id/restore", adminHandler.RestoreConfigBackup)
+
+	admin.Get("/auth/api-keys", adminAuthHandler.GetAPIKeys)
+	admin.Post("/auth/api-keys", adminAuthHandler.CreateAPIKey)
+	admin.Delete("/auth/api-keys/:route/:key", adminAuthHandler.DeleteAPIKey)
+	admin.Get("/auth/jwt", adminAuthHandler.GetJWTConfigs)
+	admin.Put("/auth/jwt/:route", adminAuthHandler.UpdateJWTConfig)
+
+	admin.Get("/rate-limits", adminRateLimitHandler.GetRateLimits)
+	admin.Get("/rate-limits/:route", adminRateLimitHandler.GetRateLimit)
+	admin.Post("/rate-limits", adminRateLimitHandler.CreateRateLimit)
+	admin.Put("/rate-limits/:route", adminRateLimitHandler.UpdateRateLimit)
+	admin.Delete("/rate-limits/:route", adminRateLimitHandler.DeleteRateLimit)
+
+	admin.Get("/circuit-breakers", adminCircuitBreakerHandler.GetCircuitBreakers)
+	admin.Get("/circuit-breakers/:route", adminCircuitBreakerHandler.GetCircuitBreaker)
+	admin.Post("/circuit-breakers", adminCircuitBreakerHandler.CreateCircuitBreaker)
+	admin.Put("/circuit-breakers/:route", adminCircuitBreakerHandler.UpdateCircuitBreaker)
+	admin.Delete("/circuit-breakers/:route", adminCircuitBreakerHandler.DeleteCircuitBreaker)
+	admin.Post("/circuit-breakers/:route/reset", adminCircuitBreakerHandler.ResetCircuitBreaker)
+
+	admin.Get("/cache", adminCacheHandler.GetCacheConfigs)
+	admin.Get("/cache/:route", adminCacheHandler.GetCacheConfig)
+	admin.Post("/cache", adminCacheHandler.CreateCacheConfig)
+	admin.Put("/cache/:route", adminCacheHandler.UpdateCacheConfig)
+	admin.Delete("/cache/:route", adminCacheHandler.DeleteCacheConfig)
+	admin.Post("/cache/:route/clear", adminCacheHandler.ClearCache)
+
+	admin.Get("/version", func(c *fiber.Ctx) error {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"version": "v1.0.0",
+			"build":   "20240301-1",
+		})
+	})
+
 	// Serve static files for Admin UI
 	uiPath := os.Getenv("ADMIN_UI_PATH")
 	if uiPath == "" {
-		uiPath = "./ui/build"
+		uiPath = "./ui/dist"
 	}
 
 	s.logger.Info("Checking for UI directory", "path", uiPath)
 
+	// Check if UI directory exists
 	if _, err := os.Stat(uiPath); err == nil {
 		s.logger.Info("Serving Admin UI", "path", uiPath)
 
-		// Serve static files
-		s.app.Static("/static", filepath.Join(uiPath, "static"))
-
-		// API Routes
-		s.app.Get("/health", func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusOK).JSON(fiber.Map{
-				"status": "ok",
-				"time":   time.Now().Format(time.RFC3339),
-			})
+		// Set specific MIME types for JavaScript modules
+		s.app.Static("/", uiPath, fiber.Static{
+			Index:  "index.html",
+			Browse: false,
+			MaxAge: 3600,
+			// Setting specific MIME types
+			Next: func(c *fiber.Ctx) bool {
+				path := c.Path()
+				// Skip API routes to avoid conflicts
+				return strings.HasPrefix(path, "/admin/") ||
+					path == "/health" ||
+					path == "/metrics"
+			},
 		})
 
-		s.app.Get("/metrics", metricsHandler.GetMetrics)
-
-		admin := s.app.Group("/admin")
-
-		admin.Get("/routes", adminHandler.GetRoutes)
-		admin.Get("/routes/:name", adminHandler.GetRoute)
-		admin.Post("/routes", adminHandler.CreateRoute)
-		admin.Put("/routes/:name", adminHandler.UpdateRoute)
-		admin.Delete("/routes/:name", adminHandler.DeleteRoute)
-
-		admin.Get("/config", adminHandler.GetConfig)
-		admin.Put("/config", adminHandler.UpdateConfig)
-		admin.Get("/config/backups", adminHandler.GetConfigBackups)
-		admin.Post("/config/backups/:id/restore", adminHandler.RestoreConfigBackup)
-
-		admin.Get("/auth/api-keys", adminAuthHandler.GetAPIKeys)
-		admin.Post("/auth/api-keys", adminAuthHandler.CreateAPIKey)
-		admin.Delete("/auth/api-keys/:route/:key", adminAuthHandler.DeleteAPIKey)
-		admin.Get("/auth/jwt", adminAuthHandler.GetJWTConfigs)
-		admin.Put("/auth/jwt/:route", adminAuthHandler.UpdateJWTConfig)
-
-		admin.Get("/rate-limits", adminRateLimitHandler.GetRateLimits)
-		admin.Get("/rate-limits/:route", adminRateLimitHandler.GetRateLimit)
-		admin.Post("/rate-limits", adminRateLimitHandler.CreateRateLimit)
-		admin.Put("/rate-limits/:route", adminRateLimitHandler.UpdateRateLimit)
-		admin.Delete("/rate-limits/:route", adminRateLimitHandler.DeleteRateLimit)
-
-		admin.Get("/circuit-breakers", adminCircuitBreakerHandler.GetCircuitBreakers)
-		admin.Get("/circuit-breakers/:route", adminCircuitBreakerHandler.GetCircuitBreaker)
-		admin.Post("/circuit-breakers", adminCircuitBreakerHandler.CreateCircuitBreaker)
-		admin.Put("/circuit-breakers/:route", adminCircuitBreakerHandler.UpdateCircuitBreaker)
-		admin.Delete("/circuit-breakers/:route", adminCircuitBreakerHandler.DeleteCircuitBreaker)
-		admin.Post("/circuit-breakers/:route/reset", adminCircuitBreakerHandler.ResetCircuitBreaker)
-
-		admin.Get("/cache", adminCacheHandler.GetCacheConfigs)
-		admin.Get("/cache/:route", adminCacheHandler.GetCacheConfig)
-		admin.Post("/cache", adminCacheHandler.CreateCacheConfig)
-		admin.Put("/cache/:route", adminCacheHandler.UpdateCacheConfig)
-		admin.Delete("/cache/:route", adminCacheHandler.DeleteCacheConfig)
-		admin.Post("/cache/:route/clear", adminCacheHandler.ClearCache)
-
-		admin.Get("/version", func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusOK).JSON(fiber.Map{
-				"version": "v1.0.0",
-				"build":   "20240301-1",
-			})
-		})
-
-		// Set the root path AFTER registering API routes but BEFORE catch-all
-		s.app.Get("/", func(c *fiber.Ctx) error {
-			s.logger.Info("Serving index.html for root path")
-			return c.SendFile(filepath.Join(uiPath, "index.html"))
-		})
-
-		// Catch-all route must be registered last
-		s.app.Get("/*", func(c *fiber.Ctx) error {
+		// Setup proper content type for JS modules
+		s.app.Use(func(c *fiber.Ctx) error {
 			path := c.Path()
-			s.logger.Info("Catch-all route", "path", path)
+			if strings.HasSuffix(path, ".js") {
+				c.Set("Content-Type", "application/javascript; charset=utf-8")
+			} else if strings.HasSuffix(path, ".css") {
+				c.Set("Content-Type", "text/css; charset=utf-8")
+			} else if strings.HasSuffix(path, ".html") {
+				c.Set("Content-Type", "text/html; charset=utf-8")
+			}
+			return c.Next()
+		})
+
+		// Catch-all route to serve index.html for client-side routing
+		s.app.Get("*", func(c *fiber.Ctx) error {
+			path := c.Path()
 
 			// Skip API routes
 			if strings.HasPrefix(path, "/admin/") ||
 				path == "/health" ||
-				path == "/metrics" ||
-				strings.HasPrefix(path, "/static/") {
+				path == "/metrics" {
 				return c.Next()
 			}
 
+			// Return index.html for all other routes to support SPA routing
 			return c.SendFile(filepath.Join(uiPath, "index.html"))
 		})
 	} else {
 		s.logger.Warn("Admin UI not found, serving API only", "path", uiPath, "error", err.Error())
-
-		// If UI not found, still serve API endpoints
-		s.app.Get("/health", func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusOK).JSON(fiber.Map{
-				"status": "ok",
-				"time":   time.Now().Format(time.RFC3339),
-			})
-		})
-
-		s.app.Get("/metrics", metricsHandler.GetMetrics)
-
-		admin := s.app.Group("/admin")
-
-		admin.Get("/routes", adminHandler.GetRoutes)
-		admin.Get("/routes/:name", adminHandler.GetRoute)
-		admin.Post("/routes", adminHandler.CreateRoute)
-		admin.Put("/routes/:name", adminHandler.UpdateRoute)
-		admin.Delete("/routes/:name", adminHandler.DeleteRoute)
-
-		admin.Get("/config", adminHandler.GetConfig)
-		admin.Put("/config", adminHandler.UpdateConfig)
-		admin.Get("/config/backups", adminHandler.GetConfigBackups)
-		admin.Post("/config/backups/:id/restore", adminHandler.RestoreConfigBackup)
-
-		admin.Get("/auth/api-keys", adminAuthHandler.GetAPIKeys)
-		admin.Post("/auth/api-keys", adminAuthHandler.CreateAPIKey)
-		admin.Delete("/auth/api-keys/:route/:key", adminAuthHandler.DeleteAPIKey)
-		admin.Get("/auth/jwt", adminAuthHandler.GetJWTConfigs)
-		admin.Put("/auth/jwt/:route", adminAuthHandler.UpdateJWTConfig)
-
-		admin.Get("/rate-limits", adminRateLimitHandler.GetRateLimits)
-		admin.Get("/rate-limits/:route", adminRateLimitHandler.GetRateLimit)
-		admin.Post("/rate-limits", adminRateLimitHandler.CreateRateLimit)
-		admin.Put("/rate-limits/:route", adminRateLimitHandler.UpdateRateLimit)
-		admin.Delete("/rate-limits/:route", adminRateLimitHandler.DeleteRateLimit)
-
-		admin.Get("/circuit-breakers", adminCircuitBreakerHandler.GetCircuitBreakers)
-		admin.Get("/circuit-breakers/:route", adminCircuitBreakerHandler.GetCircuitBreaker)
-		admin.Post("/circuit-breakers", adminCircuitBreakerHandler.CreateCircuitBreaker)
-		admin.Put("/circuit-breakers/:route", adminCircuitBreakerHandler.UpdateCircuitBreaker)
-		admin.Delete("/circuit-breakers/:route", adminCircuitBreakerHandler.DeleteCircuitBreaker)
-		admin.Post("/circuit-breakers/:route/reset", adminCircuitBreakerHandler.ResetCircuitBreaker)
-
-		admin.Get("/cache", adminCacheHandler.GetCacheConfigs)
-		admin.Get("/cache/:route", adminCacheHandler.GetCacheConfig)
-		admin.Post("/cache", adminCacheHandler.CreateCacheConfig)
-		admin.Put("/cache/:route", adminCacheHandler.UpdateCacheConfig)
-		admin.Delete("/cache/:route", adminCacheHandler.DeleteCacheConfig)
-		admin.Post("/cache/:route/clear", adminCacheHandler.ClearCache)
-
-		admin.Get("/version", func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusOK).JSON(fiber.Map{
-				"version": "v1.0.0",
-				"build":   "20240301-1",
-			})
-		})
 	}
 
 	return nil
