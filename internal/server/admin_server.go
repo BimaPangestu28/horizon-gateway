@@ -81,15 +81,16 @@ func (s *AdminServer) setupRoutes() error {
 	adminCacheHandler := handlers.NewAdminCacheHandler(s.configWatcher, s.logger)
 	metricsHandler := handlers.NewMetricsHandler(s.logger)
 
+	// Health and metrics endpoints
 	s.app.Get("/health", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"status": "ok",
 			"time":   time.Now().Format(time.RFC3339),
 		})
 	})
-
 	s.app.Get("/metrics", metricsHandler.GetMetrics)
 
+	// Admin API endpoints
 	admin := s.app.Group("/admin")
 
 	admin.Get("/routes", adminHandler.GetRoutes)
@@ -136,6 +137,7 @@ func (s *AdminServer) setupRoutes() error {
 		})
 	})
 
+	// Static file serving setup
 	uiPath := os.Getenv("ADMIN_UI_PATH")
 	if uiPath == "" {
 		uiPath = "./ui/dist"
@@ -146,26 +148,41 @@ func (s *AdminServer) setupRoutes() error {
 	if _, err := os.Stat(uiPath); err == nil {
 		s.logger.Info("Serving Admin UI", "path", uiPath)
 
-		s.app.Get("/assets/*", func(c *fiber.Ctx) error {
-			filename := c.Params("*")
-			filepath := filepath.Join(uiPath, "assets", filename)
+		// Create a custom file server middleware that ensures proper content types
+		customFileServer := func(root string) fiber.Handler {
+			return func(c *fiber.Ctx) error {
+				path := c.Path()
 
-			if strings.HasSuffix(filename, ".js") {
-				c.Set("Content-Type", "application/javascript; charset=utf-8")
-			} else if strings.HasSuffix(filename, ".css") {
-				c.Set("Content-Type", "text/css; charset=utf-8")
+				// Set correct Content-Type for JavaScript files
+				if strings.HasSuffix(path, ".js") {
+					c.Set("Content-Type", "application/javascript")
+				} else if strings.HasSuffix(path, ".css") {
+					// Set correct Content-Type for CSS files
+					c.Set("Content-Type", "text/css")
+				}
+
+				fullPath := filepath.Join(root, strings.TrimPrefix(path, "/"))
+				s.logger.Debug("Serving static file", "path", path, "fullPath", fullPath)
+
+				return c.SendFile(fullPath)
 			}
+		}
 
-			return c.SendFile(filepath)
-		})
+		// Handle asset files first - must come before the catch-all
+		s.app.Use("/assets/*", customFileServer(uiPath))
 
+		// Root path and catch-all to support SPA routing
 		s.app.Get("/", func(c *fiber.Ctx) error {
-			return c.SendFile(filepath.Join(uiPath, "index.html"))
+			indexPath := filepath.Join(uiPath, "index.html")
+			s.logger.Info("Serving index.html", "path", indexPath)
+			return c.SendFile(indexPath)
 		})
 
-		s.app.Get("/*", func(c *fiber.Ctx) error {
+		// This catch-all route must be the last one
+		s.app.Use("/*", func(c *fiber.Ctx) error {
 			path := c.Path()
 
+			// Skip API routes - they're already handled above
 			if strings.HasPrefix(path, "/admin/") ||
 				path == "/health" ||
 				path == "/metrics" ||
@@ -173,9 +190,11 @@ func (s *AdminServer) setupRoutes() error {
 				return c.Next()
 			}
 
-			return c.SendFile(filepath.Join(uiPath, "index.html"))
+			// For all other routes, serve index.html for SPA routing
+			indexPath := filepath.Join(uiPath, "index.html")
+			s.logger.Debug("Serving index.html for SPA route", "path", path, "indexPath", indexPath)
+			return c.SendFile(indexPath)
 		})
-
 	} else {
 		s.logger.Warn("Admin UI not found, serving API only", "path", uiPath, "error", err.Error())
 	}

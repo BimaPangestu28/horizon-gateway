@@ -4,10 +4,10 @@
 
 > A high-performance, community-focused API Gateway built with Go.
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/BimaPangestu28/horizon-gateway)](https://goreportcard.com/report/github.com/BimaPangestu28/horizon-gateway)
+[![Go Report Card](https://goreportcard.com/badge/github.com/horizon-gateway/horizon)](https://goreportcard.com/report/github.com/horizon-gateway/horizon)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![GitHub Stars](https://img.shields.io/github/stars/BimaPangestu28/horizon-gateway.svg)](https://github.com/BimaPangestu28/horizon-gateway/stargazers)
-[![GitHub Issues](https://img.shields.io/github/issues/BimaPangestu28/horizon-gateway.svg)](https://github.com/BimaPangestu28/horizon-gateway/issues)
+[![GitHub Stars](https://img.shields.io/github/stars/horizon-gateway/horizon.svg)](https://github.com/horizon-gateway/horizon/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/horizon-gateway/horizon.svg)](https://github.com/horizon-gateway/horizon/issues)
 
 ## 📖 Overview
 
@@ -21,9 +21,20 @@ Horizon is an open-source, enterprise-grade API Gateway designed to be simple to
 - **Enterprise Ready**: Includes features typically found only in premium solutions
 - **Developer Friendly**: Comprehensive documentation and intuitive interfaces
 
+## 🔧 Tech Stack
+
+- **Language**: Go (Golang) 1.20+
+- **HTTP Framework**: [Fiber](https://github.com/gofiber/fiber)
+- **Configuration**: YAML/JSON with hot reload capability
+- **Storage**: [Badger DB](https://github.com/dgraph-io/badger) (embedded), with optional PostgreSQL for clustering
+- **Authentication**: Native JWT, API Keys, OAuth2 support
+- **Monitoring**: Prometheus metrics, structured logging (JSON)
+- **UI**: Admin dashboard built with React and Tailwind CSS
+- **Deployment**: Docker, Kubernetes-ready
+
 ## ✨ Features
 
-### Core Functionality
+### Core
 
 - ✅ HTTP/HTTPS reverse proxy with HTTP/2 support
 - ✅ Dynamic routing based on path, headers, query params, and methods
@@ -56,14 +67,6 @@ Horizon is an open-source, enterprise-grade API Gateway designed to be simple to
 - ✅ Admin UI
 - ✅ Hot reload of configurations
 
-### Service Discovery
-
-- ✅ Static service discovery
-- ✅ DNS-based service discovery
-- ✅ Consul service discovery
-- ✅ Kubernetes service discovery
-- ✅ Etcd service discovery
-
 ### Developer Experience
 
 - ✅ Playground/testing console
@@ -73,40 +76,32 @@ Horizon is an open-source, enterprise-grade API Gateway designed to be simple to
 - ✅ Debug mode with request/response inspection
 - ✅ Request replaying
 
-### Advanced Features
-
-- ✅ Plugin system
-- ✅ API aggregation
-- ✅ GraphQL federation
-- ✅ Custom validators
-- ✅ WebAssembly plugins
-- ✅ Request transformation scripting
-- ✅ High availability clustering
-
 ## 🚧 Current Status
 
-Horizon is currently under active development. We've completed the implementation of our core features according to our roadmap:
+Horizon is currently under active development. We're working on implementing the core features first, followed by security, observability, and management components.
 
-- **Phase 1 (Completed)**: Core proxy and routing functionality
+### Roadmap
+
+- **Phase 1 (Current)**: Core proxy and routing functionality
   - HTTP/HTTPS proxy
   - Basic routing
   - Load balancing
   - Health checks
   - Docker deployment
 
-- **Phase 2 (Completed)**: Security and performance
+- **Phase 2**: Security and performance
   - Authentication (API keys, JWT)
   - Rate limiting
   - Response caching
   - Circuit breaking
 
-- **Phase 3 (Completed)**: Management and observability
+- **Phase 3**: Management and observability
   - Admin API
   - Admin UI
   - Logging and metrics
   - Tracing
 
-- **Phase 4 (Completed)**: Advanced features
+- **Phase 4**: Advanced features
   - Plugins system
   - WebSocket/gRPC support
   - Service discovery
@@ -117,6 +112,7 @@ Horizon is currently under active development. We've completed the implementatio
 ### Prerequisites
 
 - Go 1.20 or higher
+- Node.js 23 or higher
 - Docker (for containerized deployment)
 
 ### Installation
@@ -125,15 +121,19 @@ Horizon is currently under active development. We've completed the implementatio
 
 ```bash
 # Clone the repository
-git clone https://github.com/BimaPangestu28/horizon-gateway.git
-cd horizon-gateway
+git clone https://github.com/horizon-gateway/horizon.git
+cd horizon
 
-# Build the binary
-go build -o horizon cmd/main.go
+# Build the backend and UI
+make all
 
 # Run with default configuration
-./horizon
+make run
 ```
+
+This will start:
+- API Gateway on port 8080
+- Admin API and UI on port 8081
 
 #### Using Docker
 
@@ -143,6 +143,26 @@ docker run -p 8080:8080 -p 8081:8081 \
   horizongateway/horizon:latest
 ```
 
+### Development Workflow
+
+```bash
+# Run backend with hot reload
+make dev-hot
+
+# Build UI and run backend with hot reload
+make dev-full
+
+# Run UI in development mode
+make ui-dev
+```
+
+### Accessing the Application
+
+After starting the application:
+
+- Access the API Gateway at http://localhost:8080
+- Access the Admin API and UI at http://localhost:8081/admin
+
 ### Basic Configuration
 
 Create a `config.yaml` file:
@@ -151,7 +171,7 @@ Create a `config.yaml` file:
 server:
   port: 8080
   admin_port: 8081
-
+  
 routes:
   - name: example-api
     listen_path: /api/*
@@ -172,126 +192,99 @@ See the [Configuration Guide](docs/configuration.md) for full details.
 ### Project Structure
 
 ```
-horizon-gateway/
+horizon/
 ├── cmd/                # Command line applications
-│   └── horizon/        # Main application entrypoint
-├── internal/           # Private application code
-│   ├── cache/          # Caching implementations
-│   ├── config/         # Configuration management
-│   ├── core/           # Core routing and proxy logic
-│   ├── discovery/      # Service discovery
-│   ├── errors/         # Error definitions
-│   ├── graphql/        # GraphQL support
-│   ├── grpc/           # gRPC support
-│   ├── handlers/       # HTTP request handlers
-│   ├── httphandlers/   # HTTP-specific handlers
-│   ├── interfaces/     # Common interfaces
-│   ├── middleware/     # Middleware components
-│   ├── metrics/        # Metrics collection
-│   ├── plugins/        # Plugin system
-│   ├── proxy/          # Reverse proxy functionality
-│   ├── resilience/     # Circuit breaking, retries
-│   ├── security/       # Authentication and authorization
-│   ├── server/         # HTTP server setup
-│   ├── tracing/        # Distributed tracing
-│   ├── transform/      # Request/response transformation
-│   ├── types/          # Common type definitions
-│   ├── utils/          # Utility functions
-│   ├── validator/      # Request validation
-│   └── websocket/      # WebSocket support
-├── k8s/                # Kubernetes deployment files
-├── monitoring/         # Monitoring setup files
-├── plugins/            # Plugin implementations
-│   ├── builtin/        # Built-in plugins
-│   ├── custom/         # Custom plugin examples
-│   ├── interfaces/     # Plugin interfaces
-│   ├── loader/         # Plugin loading system
-│   ├── registry/       # Plugin registry
-│   └── wasm/           # WebAssembly plugins
+├── config/             # Configuration management
+├── core/               # Core gateway functionality
+├── handlers/           # HTTP handlers
+├── middleware/         # Middleware components
+├── plugins/            # Plugin system
+├── security/           # Authentication and authorization
+├── storage/            # Data storage implementations
 ├── ui/                 # Admin UI
-└── docs/               # Documentation
+└── utils/              # Utility functions
 ```
 
 ### Build & Test
 
 ```bash
 # Run tests
-go test ./...
+make test
 
 # Build for development
-go build -tags dev -o horizon cmd/main.go
+make build
 
-# Run with hot reloading (requires air)
-air
+# Run with hot reloading
+make dev-hot
 ```
 
-### Development with Docker Compose
+## 📖 Documentation
+
+Comprehensive documentation is available at [docs.horizongateway.io](https://docs.horizongateway.io)
+
+- [Getting Started](docs/getting-started.md)
+- [Configuration Reference](docs/configuration.md)
+- [API Documentation](docs/api.md)
+- [Deployment Guide](docs/deployment.md)
+- [Contribution Guidelines](CONTRIBUTING.md)
+
+## 🤝 How to Become a Contributor
+
+We welcome contributions from developers of all experience levels! Here's how you can get involved:
+
+### 1. Set Up Your Development Environment
 
 ```bash
-# Start development environment
-docker-compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d
+# Clone the repository
+git clone https://github.com/horizon-gateway/horizon.git
+cd horizon
 
-# View logs
-docker-compose logs -f
-
-# Rebuild and restart
-docker-compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d --build
+# Set up the development environment
+make setup-dev
 ```
 
-### Working with Plugins
+### 2. Find Something to Work On
+
+- Check our [GitHub Issues](https://github.com/horizon-gateway/horizon/issues) for open tasks
+- Look for issues tagged with `good-first-issue` if you're new to the project
+- Join our community chat to discuss ideas (Discord/Slack link)
+
+### 3. Create a Branch and Make Your Changes
 
 ```bash
-# Build plugins
-make build-plugins
+# Create a branch with a descriptive name
+git checkout -b feature/your-feature-name
 
-# Create a new plugin
-make setup-plugin
+# Make your changes and commit them
+git commit -m "Add your meaningful commit message"
 ```
 
-## 🖥️ Admin UI
+### 4. Submit a Pull Request
 
-Horizon includes a comprehensive Admin UI for managing all aspects of the API Gateway:
+- Push your branch to your fork of the repository
+- Open a pull request with a clear description of your changes
+- Wait for code review and address any feedback
 
-- **Dashboard**: Real-time metrics and gateway status
-- **Routes Management**: Create, edit, and delete API routes
-- **Authentication**: Manage API keys and JWT configurations
-- **Rate Limiting**: Configure rate limits for your APIs
-- **Circuit Breakers**: Control failure handling and graceful degradation
-- **Caching**: Optimize performance with response caching
-- **Analytics**: Visualize traffic patterns and error rates
+### 5. Contribution Guidelines
 
-To access the Admin UI, navigate to `http://localhost:8081` after starting Horizon.
+- Follow the Go style guide and coding conventions
+- Write tests for your code
+- Document new features
+- Keep pull requests focused on a single change
+- Sign off your commits using `git commit -s`
 
-## 📊 Observability
+### 6. Code of Conduct
 
-Horizon provides comprehensive observability features:
+All contributors are expected to adhere to our Code of Conduct, which promotes a respectful and inclusive environment for everyone. Harassment or disrespectful behavior will not be tolerated.
 
-- **Metrics**: Prometheus-compatible metrics endpoint at `/metrics`
-- **Logs**: Structured JSON logs for easy parsing and analysis
-- **Tracing**: OpenTelemetry integration with support for Jaeger, Zipkin, and more
-- **Health Checks**: Advanced health check endpoints for monitoring
+### 7. Recognition
 
-## 🤝 Contributing
+Contributors are recognized in the following ways:
+- Listed in our CONTRIBUTORS.md file
+- Acknowledged in release notes
+- Potential to join the core team based on consistent contributions
 
-We welcome contributions of all kinds! Here's how you can contribute:
-
-1. **Fork the Repository**: Create your own fork of the project
-2. **Create a Feature Branch**: `git checkout -b feature/amazing-feature`
-3. **Make Changes**: Implement your changes following the coding standards
-4. **Run Tests**: Ensure all tests pass with `go test ./...`
-5. **Commit Changes**: Commit with a descriptive message
-6. **Push to Branch**: `git push origin feature/amazing-feature`
-7. **Open a Pull Request**: Submit your changes for review
-
-Please see our [Contributing Guide](CONTRIBUTING.md) for detailed information.
-
-### What We Need Help With
-
-- Core functionality implementation
-- Testing and bug fixes
-- Documentation improvements
-- Feature suggestions
-- UI/UX enhancements
+See our [Contribution Guidelines](CONTRIBUTING.md) for more detailed information.
 
 ## 📄 License
 
