@@ -259,25 +259,27 @@ func (t *ResponseTransformer) transformBody(resp *http.Response) error {
 			jsonStr := string(body)
 
 			for _, jp := range t.bodyTransform.JSONPath {
-				switch jp.Operation {
-				case TransformOperationAdd, TransformOperationReplace:
-					var err error
-					// Handle different value types
-					switch v := jp.Value.(type) {
-					case string, bool, float64, int, int64:
-						jsonStr, err = sjson.Set(jsonStr, jp.Path, v)
-					default:
-						// For complex objects, convert through JSON
-						jsonStr, err = sjson.SetRaw(jsonStr, jp.Path, fmt.Sprintf("%v", v))
-					}
-					if err != nil {
-						return fmt.Errorf("JSONPath set operation failed: %w", err)
-					}
+				for _, op := range jp.Operations {
+					switch op.Operation {
+					case string(TransformOperationAdd), string(TransformOperationReplace):
+						var err error
+						// Handle different value types
+						switch v := op.Value.(type) {
+						case string, bool, float64, int, int64:
+							jsonStr, err = sjson.Set(jsonStr, op.Path, v)
+						default:
+							// For complex objects, convert through JSON
+							jsonStr, err = sjson.SetRaw(jsonStr, op.Path, fmt.Sprintf("%v", v))
+						}
+						if err != nil {
+							return fmt.Errorf("JSONPath set operation failed: %w", err)
+						}
 
-				case TransformOperationRemove:
-					jsonStr, err = sjson.Delete(jsonStr, jp.Path)
-					if err != nil {
-						return fmt.Errorf("JSONPath delete operation failed: %w", err)
+					case string(TransformOperationRemove):
+						jsonStr, err = sjson.Delete(jsonStr, op.Path)
+						if err != nil {
+							return fmt.Errorf("JSONPath delete operation failed: %w", err)
+						}
 					}
 				}
 			}

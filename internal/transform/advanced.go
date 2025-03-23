@@ -284,7 +284,7 @@ func (t *AdvancedTransformer) applyJSONPathTransformations(body []byte, config J
 			}
 		case "append":
 			// Find the array to append to
-			arrayData, err := parsed.Path(op.Path).Data()
+			arrayData := parsed.Path(op.Path).Data()
 			if err != nil || arrayData == nil {
 				t.logger.Warn("JSONPath append failed - path not found", "path", op.Path)
 				continue
@@ -387,7 +387,7 @@ func (t *AdvancedTransformer) applyXPathTransformations(body []byte, config XPat
 				if elem.Type == xmlquery.ElementNode {
 					// Initialize attributes slice if nil
 					if elem.Attr == nil {
-						elem.Attr = make([]xml.Attr, 0)
+						elem.Attr = make([]xmlquery.Attr, 0)
 					}
 
 					// Check if attribute already exists
@@ -402,7 +402,7 @@ func (t *AdvancedTransformer) applyXPathTransformations(body []byte, config XPat
 
 					// Add new attribute if not found
 					if !found {
-						elem.Attr = append(elem.Attr, xml.Attr{
+						elem.Attr = append(elem.Attr, xmlquery.Attr{
 							Name:  xml.Name{Local: attrName},
 							Value: valueStr,
 						})
