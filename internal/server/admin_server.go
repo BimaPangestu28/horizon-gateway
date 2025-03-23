@@ -81,7 +81,6 @@ func (s *AdminServer) setupRoutes() error {
 	adminCacheHandler := handlers.NewAdminCacheHandler(s.configWatcher, s.logger)
 	metricsHandler := handlers.NewMetricsHandler(s.logger)
 
-	// API Routes - register these first
 	s.app.Get("/health", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"status": "ok",
@@ -137,7 +136,6 @@ func (s *AdminServer) setupRoutes() error {
 		})
 	})
 
-	// Serve static files for Admin UI
 	uiPath := os.Getenv("ADMIN_UI_PATH")
 	if uiPath == "" {
 		uiPath = "./ui/dist"
@@ -145,52 +143,39 @@ func (s *AdminServer) setupRoutes() error {
 
 	s.logger.Info("Checking for UI directory", "path", uiPath)
 
-	// Check if UI directory exists
 	if _, err := os.Stat(uiPath); err == nil {
 		s.logger.Info("Serving Admin UI", "path", uiPath)
 
-		// Set specific MIME types for JavaScript modules
-		s.app.Static("/", uiPath, fiber.Static{
-			Index:  "index.html",
-			Browse: false,
-			MaxAge: 3600,
-			// Setting specific MIME types
-			Next: func(c *fiber.Ctx) bool {
-				path := c.Path()
-				// Skip API routes to avoid conflicts
-				return strings.HasPrefix(path, "/admin/") ||
-					path == "/health" ||
-					path == "/metrics"
-			},
-		})
+		s.app.Get("/assets/*", func(c *fiber.Ctx) error {
+			filename := c.Params("*")
+			filepath := filepath.Join(uiPath, "assets", filename)
 
-		// Setup proper content type for JS modules
-		s.app.Use(func(c *fiber.Ctx) error {
-			path := c.Path()
-			if strings.HasSuffix(path, ".js") {
+			if strings.HasSuffix(filename, ".js") {
 				c.Set("Content-Type", "application/javascript; charset=utf-8")
-			} else if strings.HasSuffix(path, ".css") {
+			} else if strings.HasSuffix(filename, ".css") {
 				c.Set("Content-Type", "text/css; charset=utf-8")
-			} else if strings.HasSuffix(path, ".html") {
-				c.Set("Content-Type", "text/html; charset=utf-8")
 			}
-			return c.Next()
+
+			return c.SendFile(filepath)
 		})
 
-		// Catch-all route to serve index.html for client-side routing
-		s.app.Get("*", func(c *fiber.Ctx) error {
+		s.app.Get("/", func(c *fiber.Ctx) error {
+			return c.SendFile(filepath.Join(uiPath, "index.html"))
+		})
+
+		s.app.Get("/*", func(c *fiber.Ctx) error {
 			path := c.Path()
 
-			// Skip API routes
 			if strings.HasPrefix(path, "/admin/") ||
 				path == "/health" ||
-				path == "/metrics" {
+				path == "/metrics" ||
+				strings.HasPrefix(path, "/assets/") {
 				return c.Next()
 			}
 
-			// Return index.html for all other routes to support SPA routing
 			return c.SendFile(filepath.Join(uiPath, "index.html"))
 		})
+
 	} else {
 		s.logger.Warn("Admin UI not found, serving API only", "path", uiPath, "error", err.Error())
 	}
