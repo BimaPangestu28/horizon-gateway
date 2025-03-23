@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"bytes"
 	"net/http"
+	"net/url"
 
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 	"github.com/bimapangestu28/horizon/internal/validator"
@@ -20,17 +22,14 @@ func RequestValidatorMiddleware(validator *validator.RequestValidator, logger lo
 			return c.Next()
 		}
 
-		httpReq := &http.Request{
-			Method: c.Method(),
-			URL:    createURL(c.Path(), c.Query()),
-			Header: make(http.Header),
-			Body:   c.Request().BodyStream(),
-			Host:   c.Hostname(),
+		// Create HTTP request for validation
+		httpReq, err := createRequestValidatorHTTPRequest(c)
+		if err != nil {
+			logger.Error("Failed to create HTTP request for validation",
+				"route", routeName,
+				"error", err)
+			return c.Next()
 		}
-
-		c.Request().Header.VisitAll(func(key, value []byte) {
-			httpReq.Header.Add(string(key), string(value))
-		})
 
 		result, err := validator.ValidateRequest(httpReq, routeName)
 		if err != nil {
@@ -59,20 +58,42 @@ func RequestValidatorMiddleware(validator *validator.RequestValidator, logger lo
 		// Set validation result in context for downstream handlers
 		c.Locals("validation_result", result)
 
-		// Reset the body for downstream handlers
-		c.Request().ResetBody()
-		c.Request().SetBody(c.Body())
-
 		return c.Next()
 	}
 }
 
-func createURL(path string, queryString string) *http.URL {
-	u := &http.URL{
-		Path: path,
+func createRequestValidatorHTTPRequest(c *fiber.Ctx) (*http.Request, error) {
+	method := c.Method()
+
+	// Create URL object
+	parsedURL, err := url.Parse(c.Path())
+	if err != nil {
+		return nil, err
 	}
-	if queryString != "" {
-		u.RawQuery = queryString
+
+	// Add query string
+	parsedURL.RawQuery = string(c.Request().URI().QueryString())
+
+	// Prepare request body
+	var bodyReader *bytes.Reader
+	if len(c.Body()) > 0 {
+		bodyReader = bytes.NewReader(c.Body())
+	} else {
+		bodyReader = bytes.NewReader([]byte{})
 	}
-	return u
+
+	// Create a new HTTP request
+	httpReq, err := http.NewRequest(method, parsedURL.String(), bodyReader)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq.Host = c.Hostname()
+
+	// Copy headers
+	c.Request().Header.VisitAll(func(key, value []byte) {
+		httpReq.Header.Add(string(key), string(value))
+	})
+
+	return httpReq, nil
 }

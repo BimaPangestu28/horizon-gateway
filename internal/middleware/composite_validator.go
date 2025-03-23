@@ -59,7 +59,7 @@ func CompositeValidatorMiddleware(config *ValidatorMiddlewareConfig, logger logg
 		ctx = context.WithValue(ctx, "validator_names", validatorNames)
 
 		// Create HTTP request for validation
-		httpReq, err := createHTTPRequest(c)
+		httpReq, err := createCompositeHTTPRequest(c)
 		if err != nil {
 			logger.Error("Failed to create HTTP request for validation",
 				"route", routeName,
@@ -80,15 +80,15 @@ func CompositeValidatorMiddleware(config *ValidatorMiddlewareConfig, logger logg
 			})
 		}
 
-		if !result.IsValid() {
+		if !result.Valid {
 			logger.Warn("Validation failed",
 				"route", routeName,
-				"errors", result.GetErrors())
+				"errors", result.Errors)
 
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error":   "Validation failed",
-				"message": result.GetMessage(),
-				"details": result.GetErrors(),
+				"message": result.Message,
+				"details": result.Errors,
 			})
 		}
 
@@ -169,7 +169,7 @@ func ValidateURLMiddleware(urlValidator *validator.URLValidator, logger logging.
 	}
 }
 
-func createHTTPRequest(c *fiber.Ctx) (*http.Request, error) {
+func createCompositeHTTPRequest(c *fiber.Ctx) (*http.Request, error) {
 	method := c.Method()
 	url := c.BaseURL() + c.OriginalURL()
 

@@ -22,7 +22,7 @@ func SchemaValidatorMiddleware(validator *validator.SchemaValidator, logger logg
 		}
 
 		// Create HTTP request for validation
-		httpReq, err := createHTTPRequest(c)
+		httpReq, err := createSchemaHTTPRequest(c)
 		if err != nil {
 			logger.Error("Failed to create HTTP request for validation",
 				"route", routeName,
@@ -53,14 +53,6 @@ func SchemaValidatorMiddleware(validator *validator.SchemaValidator, logger logg
 
 		// Set validation result in context for downstream handlers
 		c.Locals("schema_validation_result", result)
-
-		// Now handle the response validation
-		// We need to store the original response handler and replace it
-		// with our own to validate the response before sending it
-		c.Response().SetStatusCode(fiber.StatusOK)
-
-		// Store the original handlers
-		originalBody := c.Response().Body()
 
 		// Process the request
 		err = c.Next()
@@ -97,7 +89,7 @@ func SchemaValidatorMiddleware(validator *validator.SchemaValidator, logger logg
 	}
 }
 
-func createHTTPRequest(c *fiber.Ctx) (*http.Request, error) {
+func createSchemaHTTPRequest(c *fiber.Ctx) (*http.Request, error) {
 	method := c.Method()
 	url := c.BaseURL() + c.OriginalURL()
 
