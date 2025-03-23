@@ -2,8 +2,8 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -11,109 +11,66 @@ import (
 )
 
 const (
-	// DefaultServerPort is the default port for the main server
-	DefaultServerPort = 8080
-
-	// DefaultAdminPort is the default port for the admin server
-	DefaultAdminPort = 8081
-
-	// DefaultReadTimeout is the default timeout for reading request
-	DefaultReadTimeout = 30 * time.Second
-
-	// DefaultWriteTimeout is the default timeout for writing response
+	DefaultServerPort   = 8080
+	DefaultAdminPort    = 8081
+	DefaultReadTimeout  = 30 * time.Second
 	DefaultWriteTimeout = 30 * time.Second
-
-	// DefaultIdleTimeout is the default timeout for idle connections
-	DefaultIdleTimeout = 120 * time.Second
+	DefaultIdleTimeout  = 120 * time.Second
 )
 
-// Config represents the application configuration
-type Config struct {
-	// Server contains HTTP server configuration options
-	Server ServerConfig `yaml:"server"`
+// Regular expression to match environment variables in the form of ${VAR} or $VAR
+var envVarPattern = regexp.MustCompile(`\${([a-zA-Z0-9_]+)}|\$([a-zA-Z0-9_]+)`)
 
-	// Routes defines the API Gateway routing rules
+type Config struct {
+	Server ServerConfig  `yaml:"server"`
 	Routes []RouteConfig `yaml:"routes"`
 }
 
-// ServerConfig defines HTTP server settings
 type ServerConfig struct {
-	// Port is the port number for the main HTTP server
-	Port int `yaml:"port"`
-
-	// AdminPort is the port number for the admin API server
-	AdminPort int `yaml:"admin_port"`
-
-	// ReadTimeout is the maximum duration for reading the entire request
-	ReadTimeout time.Duration `yaml:"read_timeout"`
-
-	// WriteTimeout is the maximum duration before timing out writes of the response
+	Port         int           `yaml:"port"`
+	AdminPort    int           `yaml:"admin_port"`
+	ReadTimeout  time.Duration `yaml:"read_timeout"`
 	WriteTimeout time.Duration `yaml:"write_timeout"`
-
-	// IdleTimeout is the maximum amount of time to wait for the next request
-	IdleTimeout time.Duration `yaml:"idle_timeout"`
-
-	// TLS configuration for HTTPS
-	TLS *TLSConfig `yaml:"tls,omitempty"`
+	IdleTimeout  time.Duration `yaml:"idle_timeout"`
+	TLS          *TLSConfig    `yaml:"tls,omitempty"`
 }
 
-// TLSConfig defines TLS/SSL configuration
 type TLSConfig struct {
-	// Enabled indicates whether TLS is enabled
-	Enabled bool `yaml:"enabled"`
-
-	// CertFile is the path to the TLS certificate file
+	Enabled  bool   `yaml:"enabled"`
 	CertFile string `yaml:"cert_file"`
-
-	// KeyFile is the path to the TLS key file
-	KeyFile string `yaml:"key_file"`
+	KeyFile  string `yaml:"key_file"`
 }
 
-// LoadConfig reads configuration from the specified file and environment variables
-// It returns a parsed Config struct or an error if loading fails
 func LoadConfig(path string) (*Config, error) {
-	// Read configuration file
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
 
-	// Substitute environment variables
 	data = substituteEnvVars(data)
 
-	// First try to parse as a versioned config
-	var versionedConfig VersionedConfig
-	err = yaml.Unmarshal(data, &versionedConfig)
+	// First check if this is a versioned config
+	var versionedConfig struct {
+		Version string  `yaml:"version"`
+		Config  *Config `yaml:"config"`
+	}
 
-	// Check if this is a versioned config
-	if err == nil && versionedConfig.Version != "" && versionedConfig.Config != nil {
-		// Apply migration if needed
-		config, err := MigrateConfig(versionedConfig.Config, ConfigVersion(versionedConfig.Version))
-		if err != nil {
-			return nil, fmt.Errorf("migrating config: %w", err)
-		}
-
-		// Apply default values
+	if err := yaml.Unmarshal(data, &versionedConfig); err == nil && versionedConfig.Version != "" && versionedConfig.Config != nil {
+		config := versionedConfig.Config
 		applyDefaults(config)
-
-		// Validate configuration
 		if err := validateConfig(config); err != nil {
 			return nil, fmt.Errorf("validating config: %w", err)
 		}
-
 		return config, nil
 	}
 
-	// Fall back to parsing as a non-versioned config
+	// Fall back to standard config
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
-	// Apply default values
 	applyDefaults(&config)
-
-	// Validate configuration
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
@@ -121,30 +78,26 @@ func LoadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-// substituteEnvVars replaces environment variable references in the configuration
 func substituteEnvVars(data []byte) []byte {
 	content := string(data)
 
-	// Replace ${VAR} or $VAR with the environment variable value
-	for _, match := range envVarPattern.FindAllStringSubmatch(content, -1) {
+	matches := envVarPattern.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		// match[0] is the full match
+		// match[1] or match[2] is the variable name (depending on which pattern matched)
 		varName := match[1]
 		if varName == "" {
 			varName = match[2]
 		}
 
-		// Get environment variable value, use empty string if not found
 		value := os.Getenv(varName)
-
-		// Replace in the content
 		content = strings.Replace(content, match[0], value, -1)
 	}
 
 	return []byte(content)
 }
 
-// applyDefaults applies default values to the configuration
 func applyDefaults(config *Config) {
-	// Server defaults
 	if config.Server.Port == 0 {
 		config.Server.Port = DefaultServerPort
 	}
@@ -165,18 +118,14 @@ func applyDefaults(config *Config) {
 		config.Server.IdleTimeout = DefaultIdleTimeout
 	}
 
-	// Route defaults
 	for i := range config.Routes {
-		// Default to all methods if none specified
 		if len(config.Routes[i].Methods) == 0 {
 			config.Routes[i].Methods = []string{"*"}
 		}
 	}
 }
 
-// validateConfig validates the configuration
 func validateConfig(config *Config) error {
-	// Validate server configuration
 	if config.Server.Port < 0 || config.Server.Port > 65535 {
 		return fmt.Errorf("invalid server port: %d", config.Server.Port)
 	}
@@ -189,7 +138,6 @@ func validateConfig(config *Config) error {
 		return fmt.Errorf("server port and admin port must be different")
 	}
 
-	// Validate TLS configuration
 	if config.Server.TLS != nil && config.Server.TLS.Enabled {
 		if config.Server.TLS.CertFile == "" {
 			return fmt.Errorf("TLS certificate file path is required when TLS is enabled")
@@ -200,12 +148,10 @@ func validateConfig(config *Config) error {
 		}
 	}
 
-	// Validate routes
 	routeNames := make(map[string]bool)
 	routePaths := make(map[string]bool)
 
 	for _, route := range config.Routes {
-		// Check required fields
 		if route.Name == "" {
 			return fmt.Errorf("route name is required")
 		}
@@ -218,7 +164,6 @@ func validateConfig(config *Config) error {
 			return fmt.Errorf("route upstream URL is required")
 		}
 
-		// Check for duplicates
 		if routeNames[route.Name] {
 			return fmt.Errorf("duplicate route name: %s", route.Name)
 		}
