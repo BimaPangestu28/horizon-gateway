@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
-	"github.com/golang-jwt/jwt"
+	"github.com/golang-jwt/jwt/v4"
 )
 
 type JWTValidator struct {

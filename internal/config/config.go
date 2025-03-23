@@ -7,12 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bimapangestu28/horizon/internal/cache"
-	"github.com/bimapangestu28/horizon/internal/resilience/circuitbreaker"
-	"github.com/bimapangestu28/horizon/internal/security/auth"
-	"github.com/bimapangestu28/horizon/internal/security/ipfilter"
-	"github.com/bimapangestu28/horizon/internal/security/ratelimit"
-	"github.com/bimapangestu28/horizon/internal/transform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -73,96 +67,6 @@ type TLSConfig struct {
 
 	// KeyFile is the path to the TLS key file
 	KeyFile string `yaml:"key_file"`
-}
-
-// LoadBalancingConfig defines load balancing settings for a route
-type LoadBalancingConfig struct {
-	// Type defines the load balancing algorithm
-	Type string `yaml:"type"`
-
-	// Targets is a list of upstream targets for this route
-	Targets []TargetConfig `yaml:"targets,omitempty"`
-
-	// HealthCheck defines health check settings for targets
-	HealthCheck *HealthCheckConfig `yaml:"health_check,omitempty"`
-}
-
-// TargetConfig defines an upstream target for load balancing
-type TargetConfig struct {
-	// URL is the upstream service URL
-	URL string `yaml:"url"`
-
-	// Weight is used for weighted load balancing
-	Weight int `yaml:"weight,omitempty"`
-}
-
-// HealthCheckConfig defines health check settings
-type HealthCheckConfig struct {
-	// Path is the endpoint path to check on the target
-	Path string `yaml:"path"`
-
-	// Interval is how often to check the target
-	Interval string `yaml:"interval"`
-
-	// Timeout is how long to wait for a response
-	Timeout string `yaml:"timeout"`
-
-	// HealthyThreshold is the number of consecutive successes required
-	HealthyThreshold int `yaml:"healthy_threshold"`
-
-	// UnhealthyThreshold is the number of consecutive failures required
-	UnhealthyThreshold int `yaml:"unhealthy_threshold"`
-}
-
-// RouteConfig defines a single route mapping in the gateway
-type RouteConfig struct {
-	// Name is a unique identifier for the route
-	Name string `yaml:"name"`
-
-	// ListenPath is the path pattern to match for incoming requests
-	ListenPath string `yaml:"listen_path"`
-
-	// UpstreamURL is the target URL for proxying requests
-	UpstreamURL string `yaml:"upstream_url"`
-
-	// Methods is a list of HTTP methods this route allows
-	Methods []string `yaml:"methods"`
-
-	// StripPath indicates whether to strip the matched path prefix before forwarding
-	StripPath bool `yaml:"strip_path"`
-
-	// Headers defines required headers for matching this route
-	Headers map[string]string `yaml:"headers,omitempty"`
-
-	// QueryParams defines required query parameters for matching this route
-	QueryParams map[string]string `yaml:"query_params,omitempty"`
-
-	// Host is the hostname to match for this route
-	Host string `yaml:"host,omitempty"`
-
-	// Priority defines the route precedence when multiple routes match
-	Priority int `yaml:"priority,omitempty"`
-
-	// LoadBalancing defines load balancing settings for this route
-	LoadBalancing *LoadBalancingConfig `yaml:"load_balancing,omitempty"`
-
-	// IPFilter defines IP filtering settings for this route
-	IPFilter *ipfilter.IPFilterConfig `yaml:"ip_filter,omitempty"`
-
-	// Auth defines authentication settings for this route
-	Auth *auth.AuthConfig `yaml:"auth,omitempty"`
-
-	// RateLimiting defines rate limiting settings for this route
-	RateLimiting *ratelimit.RateLimitConfig `yaml:"rate_limiting,omitempty"`
-
-	// CircuitBreaker defines circuit breaking settings for this route
-	CircuitBreaker *circuitbreaker.CircuitBreakerConfig `yaml:"circuit_breaker,omitempty"`
-
-	// Caching defines response caching settings for this route
-	Caching *cache.CacheConfig `yaml:"caching,omitempty"`
-
-	// Transform defines request/response transformation settings for this route
-	Transform *transform.TransformConfig `yaml:"transform,omitempty"`
 }
 
 // LoadConfig reads configuration from the specified file and environment variables
