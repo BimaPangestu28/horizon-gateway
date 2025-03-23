@@ -13,65 +13,6 @@ config:
       enabled: false
       cert_file: /etc/horizon/tls/cert.pem
       key_file: /etc/horizon/tls/key.pem
-      auto_cert:
-        enabled: false
-        domains: ["example.com", "api.example.com"]
-        email: "admin@example.com"
-        cache_dir: "/etc/horizon/certs"
-
-  plugins:
-    directory: /etc/horizon/plugins
-    enabled:
-      - request-logger
-      - rate-limiter
-      - circuit-breaker
-
-  service_discovery:
-    default: direct
-    consul:
-      enabled: false
-      address: "localhost:8500"
-      datacenter: "dc1"
-      token: ""
-      tag_filter: ""
-      health_check: true
-      cache_ttl: 30s
-    kubernetes:
-      enabled: false
-      in_cluster: true
-      kube_config: ""
-      namespace: "default"
-      label_selector: ""
-      field_selector: ""
-      refresh_rate: 30s
-    etcd:
-      enabled: false
-      endpoints: ["localhost:2379"]
-      key_prefix: "/services"
-      username: ""
-      password: ""
-    dns:
-      enabled: false
-      domain: "service.local"
-      resolver: "8.8.8.8:53"
-      refresh_rate: 60s
-
-  observability:
-    logging:
-      level: "info"
-      format: "json"
-      output: "stdout"
-    metrics:
-      enabled: true
-      prometheus:
-        endpoint: "/metrics"
-        namespace: "horizon"
-    tracing:
-      enabled: false
-      type: "jaeger"
-      endpoint: "localhost:14268/api/traces"
-      service_name: "horizon-gateway"
-      sampling_ratio: 0.1
 
   routes:
     # Basic route example
@@ -275,36 +216,10 @@ config:
         write_wait: 10s
         max_message_size: 512000
     
-    # Route with gRPC support
-    - name: grpc-api
-      listen_path: /grpc/*
-      upstream_url: grpc://grpc-service:50051
-      methods: ["POST"]
-      strip_path: true
-      grpc:
-        enabled: true
-        service_name: "ExampleService"
-        keep_alive: 30s
-        keep_alive_timeout: 5s
-        max_message_size: 4194304  # 4MB
-    
-    # Route with GraphQL support
-    - name: graphql-api
-      listen_path: /graphql
-      upstream_url: http://graphql-service:8000/graphql
-      methods: ["POST", "GET"]
-      strip_path: false
-      graphql:
-        enabled: true
-        query_timeout: 30s
-        max_query_size: 1048576  # 1MB
-        enable_introspection: true
-        enable_validation: true
-        enable_caching: false
-    
-    # Route with API aggregation
+    # Route with aggregation
     - name: aggregated-api
       listen_path: /aggregate/*
+      upstream_url: http://aggregation-service:8000
       methods: ["GET"]
       strip_path: true
       aggregation:
@@ -327,6 +242,7 @@ config:
     # Route with service discovery
     - name: discovered-api
       listen_path: /discover/*
+      upstream_url: http://discovery-service:8000
       strip_path: true
       methods: ["*"]
       service_discovery:
@@ -354,6 +270,7 @@ config:
     # Multi-target load balanced route
     - name: load-balanced-api
       listen_path: /balanced/*
+      upstream_url: http://default-service:8000
       methods: ["*"]
       strip_path: true
       load_balancing:
