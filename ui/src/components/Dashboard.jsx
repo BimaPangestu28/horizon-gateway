@@ -4,8 +4,8 @@ import DashboardHeader from './dashboard/DashboardHeader';
 import SidebarMobile from './dashboard/SidebarMobile';
 import SidebarDesktop from './dashboard/SidebarDesktop';
 import DashboardStats from './dashboard/DashboardStats';
-import LoadingSpinner from './ui/LoadingSpinner';
 import NotificationService from '@/services/NotificationService';
+import DashboardSkeleton from './dashboard/DashboardSkeleton';
 
 // Lazy loaded routes for better performance
 const Overview = lazy(() => import('../pages/Overview'));
@@ -118,7 +118,7 @@ export default function Dashboard() {
 
                 {/* Route content */}
                 <div className="py-4">
-                  <Suspense fallback={<LoadingSpinner />}>
+                  <Suspense fallback={<DashboardSkeleton />}>
                     <Routes>
                       <Route path="/" element={<Overview />} />
                       <Route path="/routes" element={<RoutesList />} />
