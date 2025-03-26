@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { useRoutes } from '../hooks/useRoutes';
-import RoutesHeader from '../components/routes/RoutesHeader';
-import RoutesSearchFilter from '../components/routes/RoutesSearchFilter';
-import RoutesTable from '../components/routes/RoutesTable';
-import DeleteRouteModal from '../components/routes/DeleteRouteModal';
-import LoadingSpinner from '../components/common/LoadingSpinner';
+import { useRoutes } from '../../hooks/useRoutes';
+import RoutesHeader from './RoutesHeader';
+import RoutesSearchFilter from './RoutesSearchFilter';
+import RoutesTable from './RoutesTable';
+import DeleteRouteModal from './DeleteRouteModal';
+import LoadingSpinner from '../common/LoadingSpinner';
 
 export default function RoutesList() {
   const { routes, loading, error, fetchRoutes, deleteRoute } = useRoutes();
@@ -21,7 +21,7 @@ export default function RoutesList() {
   const handleDelete = async () => {
     if (!deleteRouteData) return;
     
-    const success = await deleteRoute(deleteRouteData.Name);
+    const success = await deleteRoute(deleteRouteData.name);
     if (success) {
       setIsDeleteModalOpen(false);
       setDeleteRouteData(null);
@@ -29,21 +29,20 @@ export default function RoutesList() {
   };
 
   const filteredRoutes = routes.filter(route => {
-    const matchesSearch = 
-      (route.Name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-       route.ListenPath?.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesSearch = route.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          route.listen_path.toLowerCase().includes(searchTerm.toLowerCase());
     
     if (filterType === 'all') return matchesSearch;
-    if (filterType === 'auth') return matchesSearch && route.Auth?.enabled;
-    if (filterType === 'cache') return matchesSearch && route.Caching?.enabled;
-    if (filterType === 'ratelimit') return matchesSearch && route.RateLimiting?.enabled;
-    if (filterType === 'circuitbreaker') return matchesSearch && route.CircuitBreaker?.enabled;
+    if (filterType === 'auth') return matchesSearch && route.auth?.enabled;
+    if (filterType === 'cache') return matchesSearch && route.caching?.enabled;
+    if (filterType === 'ratelimit') return matchesSearch && route.rate_limiting?.enabled;
+    if (filterType === 'circuitbreaker') return matchesSearch && route.circuit_breaker?.enabled;
     
     return matchesSearch;
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-6">
+    <div>
       <RoutesHeader />
       
       <RoutesSearchFilter 
@@ -76,8 +75,8 @@ export default function RoutesList() {
       <DeleteRouteModal 
         isOpen={isDeleteModalOpen}
         route={deleteRouteData}
-        onClose={() => setIsDeleteModalOpen(false)}
         onDelete={handleDelete}
+        onClose={() => setIsDeleteModalOpen(false)}
       />
     </div>
   );

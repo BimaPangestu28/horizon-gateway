@@ -5,8 +5,8 @@ class RoutesService {
     return ApiService.request('/routes');
   }
 
-  async getRoute(id) {
-    return ApiService.request(`/routes/${id}`);
+  async getRoute(name) {
+    return ApiService.request(`/routes/${name}`);
   }
 
   async createRoute(routeData) {
@@ -16,15 +16,15 @@ class RoutesService {
     });
   }
 
-  async updateRoute(id, routeData) {
-    return ApiService.request(`/routes/${id}`, {
+  async updateRoute(name, routeData) {
+    return ApiService.request(`/routes/${name}`, {
       method: 'PUT',
       body: JSON.stringify(routeData),
     });
   }
 
-  async deleteRoute(id) {
-    return ApiService.request(`/routes/${id}`, {
+  async deleteRoute(name) {
+    return ApiService.request(`/routes/${name}`, {
       method: 'DELETE',
     });
   }

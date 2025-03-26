@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: bimapangestu/horizon:latest
+    # image: bimapangestu/horizon:latest
     container_name: horizon-gateway
     ports:
       - "8080:8080"  # Main API Gateway port
@@ -137,7 +137,7 @@ services:
       retries: 3
 
   consul:
-    image: consul:latest
+    image: hashicorp/consul:1.15.4
     container_name: horizon-consul
     ports:
       - "8500:8500"
