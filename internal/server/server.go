@@ -12,13 +12,12 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 
 	"github.com/bimapangestu28/horizon/internal/config"
-	"github.com/bimapangestu28/horizon/internal/httphandlers"
 	"github.com/bimapangestu28/horizon/internal/interfaces"
 	"github.com/bimapangestu28/horizon/internal/middleware"
+	"github.com/bimapangestu28/horizon/internal/ssl"
 	"github.com/bimapangestu28/horizon/internal/utils/logging"
 )
 
-// Server represents the main API Gateway server
 type Server struct {
 	app            *fiber.App
 	config         *config.Config
@@ -27,31 +26,48 @@ type Server struct {
 	logger         logging.Logger
 	proxyHandler   interfaces.ProxyHandlerInterface
 	metricsHandler interfaces.MetricsHandlerInterface
+	sslManager     *ssl.CertbotManager
 	mu             sync.RWMutex
 }
 
-// NewServer creates a new server instance
 func NewServer(cfg *config.Config, configWatcher *config.ConfigWatcher, logger logging.Logger,
 	proxyHandler interfaces.ProxyHandlerInterface, metricsHandler interfaces.MetricsHandlerInterface) (*Server, error) {
-	// Create fiber app with appropriate settings
+
 	app := fiber.New(fiber.Config{
 		ReadTimeout:             cfg.Server.ReadTimeout,
 		WriteTimeout:            cfg.Server.WriteTimeout,
 		IdleTimeout:             cfg.Server.IdleTimeout,
-		ErrorHandler:            httphandlers.CustomErrorHandler,
 		EnableTrustedProxyCheck: true,
 		ServerHeader:            "Horizon API Gateway",
 	})
 
-	// Create server
 	server := &Server{
 		app:            app,
 		config:         cfg,
 		configWatcher:  configWatcher,
-		router:         nil, // Will be set later if needed
 		logger:         logger,
 		proxyHandler:   proxyHandler,
 		metricsHandler: metricsHandler,
+	}
+
+	// Initialize SSL manager if enabled
+	if cfg.Server.TLS != nil && cfg.Server.TLS.Enabled && cfg.SSLConfig != nil && cfg.SSLConfig.Certbot != nil && cfg.SSLConfig.Certbot.Enabled {
+		// Create reload hook to update server on certificate changes
+		reloadHook := func() error {
+			return server.reloadTLSConfig()
+		}
+
+		sslManager, err := ssl.NewCertbotManager(cfg.SSLConfig.Certbot, logger, reloadHook)
+		if err != nil {
+			return nil, fmt.Errorf("initializing SSL manager: %w", err)
+		}
+
+		server.sslManager = sslManager
+
+		// Update server TLS config with certificate paths
+		if err := sslManager.UpdateServerConfig(&cfg.Server); err != nil {
+			logger.Warn("Failed to update TLS config with Certbot certificates", "error", err)
+		}
 	}
 
 	// Setup middleware and routes
@@ -61,7 +77,56 @@ func NewServer(cfg *config.Config, configWatcher *config.ConfigWatcher, logger l
 	return server, nil
 }
 
-// setupMiddleware sets up the middleware for the server
+func (s *Server) reloadTLSConfig() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.logger.Info("Reloading TLS configuration with renewed certificates")
+
+	if err := s.sslManager.UpdateServerConfig(&s.config.Server); err != nil {
+		return fmt.Errorf("updating server config with new certificates: %w", err)
+	}
+
+	// We need to restart the server to apply new certificates
+	// This is simplified - in production you would want a more graceful approach
+	// that doesn't drop active connections
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		// Properly shutdown and restart the server
+		err := s.app.Shutdown()
+		if err != nil {
+			s.logger.Error("Error shutting down server for certificate reload", "error", err)
+			return
+		}
+
+		port := s.config.Server.Port
+		addr := fmt.Sprintf(":%d", port)
+
+		if s.config.Server.TLS != nil && s.config.Server.TLS.Enabled {
+			s.logger.Info("Restarting HTTPS server with new certificates",
+				"port", port,
+				"cert_file", s.config.Server.TLS.CertFile,
+				"key_file", s.config.Server.TLS.KeyFile)
+			err = s.app.ListenTLS(addr, s.config.Server.TLS.CertFile, s.config.Server.TLS.KeyFile)
+		} else {
+			s.logger.Info("Restarting HTTP server", "port", port)
+			err = s.app.Listen(addr)
+		}
+
+		if err != nil {
+			s.logger.Error("Error restarting server after certificate reload", "error", err)
+		}
+	}()
+
+	return nil
+}
+
+func (s *Server) SetRouter(router interfaces.Router) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.router = router
+}
+
 func (s *Server) setupMiddleware() {
 	// Basic middleware
 	s.app.Use(recover.New())
@@ -79,10 +144,14 @@ func (s *Server) setupMiddleware() {
 	s.app.Use(middleware.MetricsMiddleware(s.logger))
 }
 
-// setupRoutes sets up the routes for the server
 func (s *Server) setupRoutes() {
 	// Health check endpoint
-	s.app.Get("/health", httphandlers.HealthCheck)
+	s.app.Get("/health", func(c *fiber.Ctx) error {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"status": "ok",
+			"time":   time.Now().Format(time.RFC3339),
+		})
+	})
 
 	// Register route handlers for all configured routes
 	for _, route := range s.config.Routes {
@@ -126,7 +195,7 @@ func (s *Server) setupRoutes() {
 			handlers = append(handlers, middleware.TransformMiddleware(nil, nil, s.logger))
 		}
 
-		// Add proxy handler using the interface
+		// Add proxy handler (using interface)
 		handlers = append(handlers, func(c *fiber.Ctx) error {
 			return s.proxyHandler.HandleRequest(c)
 		})
@@ -148,8 +217,14 @@ func (s *Server) setupRoutes() {
 	})
 }
 
-// Start starts the server
 func (s *Server) Start() error {
+	// Start SSL manager if configured
+	if s.sslManager != nil {
+		if err := s.sslManager.Start(); err != nil {
+			return fmt.Errorf("starting SSL manager: %w", err)
+		}
+	}
+
 	s.mu.RLock()
 	port := s.config.Server.Port
 	tlsConfig := s.config.Server.TLS
@@ -169,12 +244,15 @@ func (s *Server) Start() error {
 	return s.app.Listen(addr)
 }
 
-// Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
+	// Stop SSL manager if running
+	if s.sslManager != nil {
+		s.sslManager.Stop()
+	}
+
 	return s.app.ShutdownWithContext(ctx)
 }
 
-// UpdateConfig updates the server configuration
 func (s *Server) UpdateConfig(cfg *config.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -191,11 +269,4 @@ func (s *Server) UpdateConfig(cfg *config.Config) error {
 
 	// For now, just return success
 	return nil
-}
-
-// SetRouter sets the router for the server
-func (s *Server) SetRouter(router interfaces.Router) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.router = router
 }

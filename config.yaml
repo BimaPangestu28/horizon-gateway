@@ -8,11 +8,24 @@ config:
     write_timeout: 30s
     idle_timeout: 120s
     
-    # TLS configuration
+    # TLS configuration, if you want to use custom certificates
     tls:
       enabled: false
       cert_file: /etc/horizon/tls/cert.pem
       key_file: /etc/horizon/tls/key.pem
+
+  # If you want use certbot, set enabled to true
+  ssl:
+    enabled: true
+    certbot:
+      enabled: true
+      domains:
+        - "yourdomain.com"
+        - "*.yourdomain.com"  # Wildcard subdomain
+      email: "your-email@example.com"  # Required for Let's Encrypt
+      cert_path: "/etc/letsencrypt"
+      renew_interval: 12h
+      webroot_path: "/var/www/certbot"
 
   routes:
     # Basic route example

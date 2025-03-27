@@ -22,8 +22,9 @@ const (
 var envVarPattern = regexp.MustCompile(`\${([a-zA-Z0-9_]+)}|\$([a-zA-Z0-9_]+)`)
 
 type Config struct {
-	Server ServerConfig  `yaml:"server"`
-	Routes []RouteConfig `yaml:"routes"`
+	Server    ServerConfig  `yaml:"server"`
+	Routes    []RouteConfig `yaml:"routes"`
+	SSLConfig *SSLConfig    `yaml:"ssl,omitempty"`
 }
 
 type ServerConfig struct {
@@ -39,6 +40,23 @@ type TLSConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 	CertFile string `yaml:"cert_file"`
 	KeyFile  string `yaml:"key_file"`
+}
+
+type SSLConfig struct {
+	Enabled bool           `yaml:"enabled"`
+	Certbot *CertbotConfig `yaml:"certbot,omitempty"`
+	Static  *TLSConfig     `yaml:"static,omitempty"`
+}
+
+type CertbotConfig struct {
+	Enabled       bool          `yaml:"enabled"`
+	Domains       []string      `yaml:"domains"`
+	Email         string        `yaml:"email"`
+	CertPath      string        `yaml:"cert_path"`
+	RenewInterval time.Duration `yaml:"renew_interval"`
+	CertbotBin    string        `yaml:"certbot_bin"`
+	Staging       bool          `yaml:"staging"`
+	WebRootPath   string        `yaml:"webroot_path"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -123,6 +141,21 @@ func applyDefaults(config *Config) {
 			config.Routes[i].Methods = []string{"*"}
 		}
 	}
+
+	// If we have SSL config but no TLS config, create it
+	if config.SSLConfig != nil && config.SSLConfig.Enabled {
+		if config.Server.TLS == nil {
+			config.Server.TLS = &TLSConfig{
+				Enabled: true,
+			}
+		}
+
+		// If we have static certificate config, use it
+		if config.SSLConfig.Static != nil {
+			config.Server.TLS.CertFile = config.SSLConfig.Static.CertFile
+			config.Server.TLS.KeyFile = config.SSLConfig.Static.KeyFile
+		}
+	}
 }
 
 func validateConfig(config *Config) error {
@@ -139,11 +172,11 @@ func validateConfig(config *Config) error {
 	}
 
 	if config.Server.TLS != nil && config.Server.TLS.Enabled {
-		if config.Server.TLS.CertFile == "" {
+		if config.SSLConfig != nil && config.SSLConfig.Certbot != nil && config.SSLConfig.Certbot.Enabled {
+			// Certbot will handle certificates, so no validation needed for cert files
+		} else if config.Server.TLS.CertFile == "" {
 			return fmt.Errorf("TLS certificate file path is required when TLS is enabled")
-		}
-
-		if config.Server.TLS.KeyFile == "" {
+		} else if config.Server.TLS.KeyFile == "" {
 			return fmt.Errorf("TLS key file path is required when TLS is enabled")
 		}
 	}
